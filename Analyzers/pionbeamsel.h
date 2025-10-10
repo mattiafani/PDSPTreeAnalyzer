@@ -31,6 +31,13 @@ class pionbeamsel : public AnalyzerCore {
   //==================
   // beam sel
   //==================
+  double Z_beam_end_cut = 10.;
+
+  double cos_spec_tpc_at_z = -999.;
+  double delta_x_tpc_spec_at_z = -999;
+  double delta_y_tpc_spec_at_z = -999;
+  void Set_delta_XY_spec_TPC_at_Z(const vector<double> & calo_X, const vector<double> & calo_Y, const vector<double> & calo_Z, double Z_min);
+
   bool Pass_BeamStartZ(double N_sigma = 2.);
   double beam_start_z_mu_mc = 0.143;
   double beam_start_z_sigma_mc = 0.219;
@@ -43,18 +50,31 @@ class pionbeamsel : public AnalyzerCore {
   double Beam_delta_X_sigma_mc = 1.439;
   double Beam_delta_X_mu_data = -2.647;
   double Beam_delta_X_sigma_data = 1.802;
-
   double Beam_delta_Y_mu_mc = -0.644;
   double Beam_delta_Y_sigma_mc = 1.473;
   double Beam_delta_Y_mu_data =	-2.269;
   double Beam_delta_Y_sigma_data = 2.314;
 
+  double Beam_delta_X_at_z10_mu_mc = -1.762;
+  double Beam_delta_X_at_z10_sigma_mc = 1.737;
+  double Beam_delta_X_at_z10_mu_data = 3.300;
+  double Beam_delta_X_at_z10_sigma_data = 2.107;
+  double Beam_delta_Y_at_z10_mu_mc = 0.768;
+  double Beam_delta_Y_at_z10_sigma_mc = 1.833;
+  double Beam_delta_Y_at_z10_mu_data = 2.498;
+  double Beam_delta_Y_at_z10_sigma_data = 2.449;
+  
   //==================
   // beam reco
   //==================
   void MuonKELoss(TString beam_selec_str, double weight);
-  double GetBeamRRatZ10cm(const vector<double> & ResRange, const vector<double> & calo_Z);
-  
+  double GetBeamRRatZ(const vector<double> & ResRange, const vector<double> & calo_Z, double Z_fv);
+
+  //==================
+  // beam true
+  //==================
+  void get_true_XYZ_at_FF(double& true_ff_X, double& true_ff_Y, double& true_ff_Z);
+
   pionbeamsel();
   ~pionbeamsel();
 };

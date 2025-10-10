@@ -3,3 +3,4 @@ Beam	SF	TrkLength	Reweighting_pion_TrkLength_noweight.root	Reweight	TH1D
 Beam	SF	Proton_CaloSize		Proton_P_reweight.root				P_reweight_Beam_CaloSize	TH1D
 Beam    SF      Pion_Calosize_0p5       P_reweight_0.5GeV.root                          Beam_CaloSize_Beam_P_beam_inst  TH1D
 Beam	SF	Pion_chip_KE_0p5	KE_start_reweight_0.5GeV.root			Beam_chi2proton_Beam_KE_ff	TH1D
+Beam	SF	Pion_PID_P_0p5		P_beam_inst_reweight_0.5GeV.root		Beam_scraper_Beam_P_beam_inst	TH1D

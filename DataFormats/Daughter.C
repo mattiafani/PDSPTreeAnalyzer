@@ -71,8 +71,19 @@ Daughter::Daughter(){
   j_allTrack_endZ = -9999.;
   j_allTrack_vertex_michel_score = -9999.;
   j_allTrack_vertex_nHits = -1;
+  j_allShower_ID = -1;
+  j_allShower_len = -9999.;
+  j_allShower_startX = -9999.;
+  j_allShower_startY = -9999.;
+  j_allShower_startZ = -9999.;
+  j_allShower_dirX = -9999.;
+  j_allShower_dirY = -9999.;
+  j_allShower_dirZ = -9999.;
+  j_allShower_energy = -9999.;
   j_pandora_type = -1;
   j_Beam_Cos = -9999.;
+  j_Beam_Dist = -9999.;
+  j_Beam_Dist_allShower = -9999.;
 }
 
 Daughter::~Daughter(){}
@@ -146,6 +157,16 @@ void Daughter::Set_allTrack_endY(double i_allTrack_endY){ j_allTrack_endY = i_al
 void Daughter::Set_allTrack_endZ(double i_allTrack_endZ){ j_allTrack_endZ = i_allTrack_endZ; }
 void Daughter::Set_allTrack_vertex_michel_score(double i_allTrack_vertex_michel_score){ j_allTrack_vertex_michel_score = i_allTrack_vertex_michel_score; }
 void Daughter::Set_allTrack_vertex_nHits(int i_allTrack_vertex_nHits){ j_allTrack_vertex_nHits = i_allTrack_vertex_nHits; }
+void Daughter::Set_allShower_ID(int i_allShower_ID){ j_allShower_ID = i_allShower_ID; }
+void Daughter::Set_allShower_len(double i_allShower_len){ j_allShower_len = i_allShower_len;}
+void Daughter::Set_allShower_startX(double i_allShower_startX){ j_allShower_startX = i_allShower_startX;}
+void Daughter::Set_allShower_startY(double i_allShower_startY){ j_allShower_startY = i_allShower_startY;}
+void Daughter::Set_allShower_startZ(double i_allShower_startZ){ j_allShower_startZ = i_allShower_startZ;}
+void Daughter::Set_allShower_dirX(double i_allShower_dirX){ j_allShower_dirX = i_allShower_dirX;}
+void Daughter::Set_allShower_dirY(double i_allShower_dirY){ j_allShower_dirY = i_allShower_dirY;}
+void Daughter::Set_allShower_dirZ(double i_allShower_dirZ){ j_allShower_dirZ = i_allShower_dirZ;}
+void Daughter::Set_allShower_energy(double i_allShower_energy){ j_allShower_energy = i_allShower_energy;}
 void Daughter::Set_pandora_type(int i_pandora_type){ j_pandora_type = i_pandora_type; }
 void Daughter::Set_Beam_Cos(double i_Beam_Cos) { j_Beam_Cos = i_Beam_Cos; }
 void Daughter::Set_Beam_Dist(double i_Beam_Dist) { j_Beam_Dist = i_Beam_Dist; }
+void Daughter::Set_Beam_Dist_allShower(double i_Beam_Dist_allShower) { j_Beam_Dist_allShower = i_Beam_Dist_allShower; }

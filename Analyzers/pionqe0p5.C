@@ -23,31 +23,116 @@ void pionqe0p5::executeEvent(){
   exp_trk_len_beam_inst = map_BB[211] -> RangeFromKESpline(KE_beam_inst);
   trk_len_ratio = evt.reco_beam_alt_len / exp_trk_len_beam_inst;
   mass_beam = 139.57;
-  KE_ff_reco = KE_beam_inst - 30.; // -- checked upstream KE loss using stopping muons, central value is 30 MeV but we need to assign syst. uncert. on it
-  KE_end_reco = map_BB[211]->KEAtLength(KE_ff_reco, evt.reco_beam_alt_len);
+  KE_ff_reco = KE_beam_inst - KE_ff_subt; // -- checked upstream KE loss using stopping muons, central value is 30 MeV but we need to assign syst. uncert. on it
+  KE_end_reco = -999.;
   E_end_reco = KE_end_reco + mass_beam;
 
-  double KE_ff_reweight = 1.;
-  if(!IsData) KE_ff_reweight = MCCorr -> MomentumReweight_SF("Pion_chip_KE_0p5", KE_ff_reco, 0.);
+  double P_reweight = 1.;
+  if(!IsData) P_reweight = MCCorr -> MomentumReweight_SF("Pion_PID_P_0p5", P_beam_inst, 0.);
   
   // -- 1. Beam instruments
-  if(P_beam_inst < 420. || P_beam_inst > 580.) return;
+  if(P_beam_inst < 420. || P_beam_inst > 600.) return;
   //if(!PassBeamMomentumWindowCut()) return;
 
   if(!Pass_Beam_PID(211)) return;
+  FillHist("beam_cut_flow_" + pi_type_str, 0.5, 1., 20, 0., 20.);
+  
   if(!PassBeamScraperCut()) return;
-  FillHist("beam_cut_flow", 1.5, 1., 20, 0., 20.);
+  FillHist("beam_cut_flow_" + pi_type_str, 1.5, 1., 20, 0., 20.);
 
-  if(!Pass_BeamStartZ(2.)) return;
+  if(evt.reco_beam_calo_wire->empty()) return;
+  Set_delta_XY_spec_TPC_at_Z((*evt.reco_beam_calo_X), (*evt.reco_beam_calo_Y), (*evt.reco_beam_calo_Z), 10.);
+  FillHist("beam_cut_flow_" + pi_type_str, 2.5, 1., 20, 0., 20.);
+
+  if(evt.reco_beam_type != pandora_slice_pdg) return;
+  FillHist("beam_cut_flow_" + pi_type_str, 3.5, 1., 20, 0., 20.);
+
+  if(evt.reco_beam_calo_endZ < 10.) return;
+  double rr_at_z10cm = GetBeamRRatZ10cm((*evt.reco_beam_resRange_SCE), (*evt.reco_beam_calo_Z));
+  KE_end_reco = map_BB[211]->KEAtLength(KE_ff_reco, rr_at_z10cm);
+  E_end_reco = KE_end_reco + mass_beam;
+  FillHist("beam_cut_flow_" + pi_type_str, 4.5, 1., 20, 0., 20.);
+  
   if(!Pass_beam_delta_X_cut(2.)) return;
   if(!Pass_beam_delta_Y_cut(2.)) return;
-  if(chi2_proton > 300. || chi2_proton < 50.) return;
+  FillHist("beam_cut_flow_" + pi_type_str, 5.5, 1., 20, 0., 20.);
 
+  if(chi2_proton > 300. || chi2_proton < 140.) return;
+  FillHist("beam_cut_flow_" + pi_type_str, 6.5, 1., 20, 0., 20.);
+  
   vector<Daughter> daughters_all = GetAllDaughters();
-  vector<Daughter> loose_pions = SelectLoosePions(daughters_all);
+  vector<Daughter> loose_charged_pions = SelectLooseChargedPions(daughters_all);
+  vector<Daughter> loose_neutral_pions = SelectLooseNeutralPions(daughters_all);
 
-  FillRecoPionPlots("loose_pion", loose_pions, KE_ff_reweight);
+  // == Check allshower and alltrack multiplicities
+  if( (*evt.reco_daughter_allTrack_ID).size() !=  (*evt.reco_daughter_allShower_energy).size()){
+    cout << Form("N(daugh. all track): %zu, N(daugh. all shower): %zu", (*evt.reco_daughter_allTrack_ID).size(), (*evt.reco_daughter_allShower_energy).size()) << endl;
+  }
+
+  // == Study secondary particle selection
+  StudySecondaryNeutralPions(daughters_all);
+
+  
+  // == Study secondary particle multiplicities
+  FillRecoPionPlots("loose_charged_pion", loose_charged_pions, P_reweight);
+
+
+  // == Study broken tracks
+  //FillTrueBeamPlots("Beam_chi2proton", loose_pions, P_reweight);
 }
+
+void pionqe0p5::StudySecondaryNeutralPions(const vector<Daughter> daughters_all){
+
+  vector<TrueDaughter> true_daughters_all = GetAllTrueDaughters();
+  bool has_nupi = false;
+
+  for(unsigned int i = 0; i < true_daughters_all.size(); i++){
+    TrueDaughter this_true_daughter = true_daughters_all.at(i);
+    int this_PDG = this_true_daughter.PDG();
+    double this_startP = this_true_daughter.startP() * 1000.;
+    //cout << Form("%d, PDG: %d, startP: %f", i, this_true_daughter.PDG(), this_true_daughter.startP() * 1000.) << endl;
+    if(abs(this_PDG) == 211){
+      JSFillHist("true_sec", "true_sec_charged_pion_start_P", this_startP, 1., 1000., 0., 1000.);
+    }
+    else if(this_PDG == 111){
+      JSFillHist("true_sec", "true_sec_neutral_pion_start_P", this_startP, 1., 1000., 0., 1000.);
+      has_nupi = true;
+    }
+    else if(this_PDG == 2212){
+      JSFillHist("true_sec", "true_sec_proton_start_P", this_startP, 1., 1000., 0., 1000.);
+    }
+    else continue;
+  }
+
+  JSFillHist("Daughter_multiplicity", "all", daughters_all.size(), 1., 10., -0.5, 9.5);
+  if(has_nupi) JSFillHist("Daughter_multiplicity", "all_has_nupi", daughters_all.size(), 1., 10., -0.5, 9.5);
+
+  
+  for(unsigned int i = 0; i < daughters_all.size(); i++){
+    Daughter this_daughter = daughters_all.at(i);
+    int this_PdgID = this_daughter.PFP_true_byHits_PDG();
+    TString particle_str = "";
+    if(this_PdgID == 2212) particle_str = "proton";
+    else if(abs(this_PdgID) == 211) particle_str = "chpion";
+    else if(abs(this_PdgID) == 13) particle_str = "muon";
+    //else if(this_PdgID == 111)  particle_str = "nupion";
+    else particle_str = "other";
+
+    if(this_PdgID == 111) cout << "nupi daughter" << endl;
+    
+    JSFillHist("Daughter_" + particle_str, particle_str + "_Beam_Dist_allShower", this_daughter.Beam_Dist_allShower(), 1., 100., 0., 100.);
+    JSFillHist("Daughter_" + particle_str, particle_str + "_allShower_energy", this_daughter.allShower_energy(), 1., 1000., 0., 1000.);
+    JSFillHist("Daughter_" + particle_str, particle_str + "_PFP_trackScore", this_daughter.PFP_trackScore(), 1., 100., 0., 1.);
+
+    if(has_nupi){
+      JSFillHist("Daughter_" + particle_str, particle_str + "_PFP_trackScore_has_nupi", this_daughter.PFP_trackScore(), 1., 100., 0., 1.);
+    }
+  }
+
+}
+
+
+
 
 void pionqe0p5::FillRecoPionPlots(TString daughter_sec_str, const vector<Daughter> pions, double weight){
 
@@ -60,6 +145,71 @@ void pionqe0p5::FillRecoPionPlots(TString daughter_sec_str, const vector<Daughte
   }
 }
 
+void pionqe0p5::FillTrueBeamPlots(TString sel_str, const vector<Daughter> pions, double weight){
+
+  // == study track breaking
+  if(!IsData){
+    double true_beam_len = Get_true_beamlen();
+    double trklen_reco_over_truth = -1.;
+    if(true_beam_len > 0.) trklen_reco_over_truth = evt.reco_beam_alt_len / true_beam_len;
+
+    double KE_ff_true = Get_true_ffKE();
+    double trklen_KE_ff_true = -9999.;
+    if(KE_ff_true > 0.) trklen_KE_ff_true = map_BB[211] -> RangeFromKE(KE_ff_true);
+
+    double trklen_reco_over_KE_ff = evt.reco_beam_alt_len / trklen_KE_ff_true;
+    
+    JSFillHist(sel_str, sel_str + "_trklen_reco_over_truth_" + pi_type_str, trklen_reco_over_truth, weight, 1000., 0., 10.);
+    JSFillHist(sel_str, sel_str + "_trklen_reco_over_KE_ff_" + pi_type_str, trklen_reco_over_KE_ff, weight, 1000., 0., 10.);
+
+    TString n_pi_str = "";
+    if(pions.size() == 0) n_pi_str = "0pi";
+    else n_pi_str = "least1pi";
+
+    JSFillHist(sel_str, sel_str + "_trklen_reco_over_truth_" + n_pi_str + "_" + pi_type_str, trklen_reco_over_truth, weight, 1000., 0., 10.);
+    JSFillHist(sel_str, sel_str + "_KE_end_reco_vs_trklen_reco_over_truth_" + n_pi_str + "_" + pi_type_str, KE_end_reco, trklen_reco_over_truth, weight, 10., 0., 500., 150., 0., 1.5);
+    JSFillHist(sel_str, sel_str + "_KE_end_reco_vs_trklen_reco_over_KE_ff_" + n_pi_str + "_" + pi_type_str, KE_end_reco, trklen_reco_over_KE_ff, weight, 10., 0., 500., 150., 0., 1.5);
+    
+    FillBeamTrueTrajPlots(sel_str, n_pi_str, trklen_reco_over_truth, 1.);
+  }
+}
+
+void pionqe0p5::FillBeamTrueTrajPlots(TString sel_str, TString n_pi_str, double trklen_reco_over_truth, double weight){
+
+  if(abs(evt.true_beam_PDG) != 13 && abs(evt.true_beam_PDG) != 211 & abs(evt.true_beam_PDG) != 2212) return;
+  int start_idx = -1;
+  for(int i_true_hit = 0; i_true_hit < (*evt.true_beam_traj_Z).size(); i_true_hit++){
+    if((*evt.true_beam_traj_Z).at(i_true_hit) >= 0){
+      start_idx = i_true_hit - 1;
+      if (start_idx < 0) start_idx = -1;
+      break;
+    }
+  }
+
+  double min_cos_seg = 1.1;
+  if (start_idx >= 0){
+    for (int i_true_hit = start_idx + 2; i_true_hit < (*evt.true_beam_traj_Z).size() - 1; i_true_hit++){
+
+      TVector3 this_vec((*evt.true_beam_traj_X).at(i_true_hit + 1) - (*evt.true_beam_traj_X).at(i_true_hit),
+			(*evt.true_beam_traj_Y).at(i_true_hit + 1) - (*evt.true_beam_traj_Y).at(i_true_hit),
+			(*evt.true_beam_traj_Z).at(i_true_hit + 1) - (*evt.true_beam_traj_Z).at(i_true_hit)
+			);
+
+      TVector3 prev_vec((*evt.true_beam_traj_X).at(i_true_hit) - (*evt.true_beam_traj_X).at(i_true_hit - 1),
+                        (*evt.true_beam_traj_Y).at(i_true_hit) - (*evt.true_beam_traj_Y).at(i_true_hit - 1),
+                        (*evt.true_beam_traj_Z).at(i_true_hit) - (*evt.true_beam_traj_Z).at(i_true_hit - 1)
+                        );
+
+      double this_cos_theta_seg = this_vec.Dot(prev_vec) / (this_vec.Mag() * prev_vec.Mag());
+      if(this_cos_theta_seg < min_cos_seg) min_cos_seg = this_cos_theta_seg;
+    }
+  }
+
+  JSFillHist(sel_str, sel_str + "_trklen_reco_over_truth_vs_min_cos_seg_" + pi_type_str, trklen_reco_over_truth, min_cos_seg, weight, 20., 0.5, 1.5, 100., -1., 1.); 
+  JSFillHist(sel_str, sel_str + "_trklen_reco_over_truth_vs_min_cos_seg_" + n_pi_str + "_" + pi_type_str, trklen_reco_over_truth, min_cos_seg, weight, 20., 0.5, 1.5, 100., -1., 1.);
+
+}
+
 double pionqe0p5::GetBeamRRatZ10cm(const vector<double> & ResRange, const vector<double> & calo_Z){
 
   double out = -1.;
@@ -69,7 +219,7 @@ double pionqe0p5::GetBeamRRatZ10cm(const vector<double> & ResRange, const vector
   int this_N_calo = calo_Z.size();
   //cout << "ResRange.size(): " << ResRange.size() << ", calo_Z.size(): " << calo_Z.size() << endl; // -- confirmed that the two vectors have exactly the same sizes
   
-  for(int i = 0; i < this_N_calo; i++){
+  for(int i = 1; i < this_N_calo; i++){
     //cout << "ResRange " << i << ": " << ResRange.at(i) << ", calo_Z: " << calo_Z.at(i) << endl; // -- confirmed that rr is in descending order
     double this_calo_Z = calo_Z.at(i);
     if(this_calo_Z > 10.){
@@ -104,8 +254,8 @@ bool pionqe0p5::Pass_BeamStartZ(double N_sigma){
 bool pionqe0p5::Pass_beam_delta_X_cut(double N_sigma){
 
   bool out = false;
-  double Beam_delta_X_over_sigma = (delta_X_spec_TPC - Beam_delta_X_mu_data) / Beam_delta_X_sigma_data;
-  if(!IsData) Beam_delta_X_over_sigma = (delta_X_spec_TPC - Beam_delta_X_mu_mc) / Beam_delta_X_sigma_mc;
+  double Beam_delta_X_over_sigma = (delta_x_tpc_spec_at_z - Beam_delta_X_at_z10_mu_data) / Beam_delta_X_at_z10_sigma_data;
+  if(!IsData) Beam_delta_X_over_sigma = (delta_x_tpc_spec_at_z - Beam_delta_X_at_z10_mu_mc) / Beam_delta_X_at_z10_sigma_mc;
 
   if(fabs(Beam_delta_X_over_sigma) < N_sigma) out = true;
 
@@ -115,15 +265,49 @@ bool pionqe0p5::Pass_beam_delta_X_cut(double N_sigma){
 bool pionqe0p5::Pass_beam_delta_Y_cut(double N_sigma){
 
   bool out = false;
-  double Beam_delta_Y_over_sigma = (delta_Y_spec_TPC - Beam_delta_Y_mu_data) / Beam_delta_Y_sigma_data;
-  if(!IsData) Beam_delta_Y_over_sigma =(delta_Y_spec_TPC - Beam_delta_Y_mu_mc) / Beam_delta_Y_sigma_mc;
+  double Beam_delta_Y_over_sigma = (delta_y_tpc_spec_at_z - Beam_delta_Y_at_z10_mu_data) / Beam_delta_Y_at_z10_sigma_data;
+  if(!IsData) Beam_delta_Y_over_sigma = (delta_y_tpc_spec_at_z - Beam_delta_Y_at_z10_mu_mc) / Beam_delta_Y_at_z10_sigma_mc;
 
   if(fabs(Beam_delta_Y_over_sigma) < N_sigma) out = true;
 
   return out;
 }
 
-std::vector<Daughter> pionqe0p5::SelectLoosePions(const vector<Daughter>& in){
+void pionqe0p5::Set_delta_XY_spec_TPC_at_Z(const vector<double> & calo_X, const vector<double> & calo_Y, const vector<double> & calo_Z, double Z_min){
+
+  double X_spec_at_Z = evt.beam_inst_X + Z_min * evt.beam_inst_dirX / evt.beam_inst_dirZ;
+  double Y_sepc_at_Z = evt.beam_inst_Y + Z_min * evt.beam_inst_dirY / evt.beam_inst_dirZ;
+
+  size_t fv_index = 0;
+  for (; fv_index < calo_Z.size(); ++fv_index) {
+    if (calo_Z[fv_index] > Z_min) break;
+  }
+  if (fv_index == 0) ++fv_index;
+
+  double x1 = calo_X[fv_index];
+  double y1 = calo_Y[fv_index];
+  double z1 = calo_Z[fv_index];
+
+  double x0 = calo_X[fv_index-1];
+  double y0 = calo_Y[fv_index-1];
+  double z0 = calo_Z[fv_index-1];
+
+  double xl = calo_X.back();
+  double yl = calo_Y.back();
+  double zl = calo_Z.back();
+
+  //project to the FV face
+  double x = (Z_min - z0)*(x1 - x0)/(z1 - z0) + x0;
+  double y = (Z_min - z0)*(y1 - y0)/(z1 - z0) + y0;
+
+  delta_x_tpc_spec_at_z = x - X_spec_at_Z;
+  delta_y_tpc_spec_at_z = y - Y_sepc_at_Z;
+
+  double r_end = sqrt((xl-x)*(xl-x) + (yl-y)*(yl-y) + (zl-Z_min)*(zl-Z_min));
+  cos_spec_tpc_at_z = ((xl - x) * evt.beam_inst_dirX + (yl - y) * evt.beam_inst_dirY + (zl - Z_min) * evt.beam_inst_dirZ) / r_end;
+}
+
+std::vector<Daughter> pionqe0p5::SelectLooseChargedPions(const vector<Daughter>& in){
 
   vector<Daughter> out;
   double cut_trackScore = 0.5;
@@ -134,6 +318,17 @@ std::vector<Daughter> pionqe0p5::SelectLoosePions(const vector<Daughter>& in){
     Daughter this_in = in.at(i);
     double this_chi2 = this_in.allTrack_Chi2_proton() / this_in.allTrack_Chi2_ndof();
     if(this_in.PFP_trackScore() > cut_trackScore && this_chi2 > cut_chi2_proton && this_in.allTrack_alt_len() < cut_trk_len_upper && this_in.allTrack_alt_len() > cut_trk_len_lower) out.push_back(this_in);
+  }
+  return out;
+}
+
+std::vector<Daughter> pionqe0p5::SelectLooseNeutralPions(const vector<Daughter>& in){
+
+  vector<Daughter> out;
+  double cut_trackScore = 0.3;
+  for(unsigned int i = 0; i < in.size(); i++){
+    Daughter this_in = in.at(i);
+    if(this_in.PFP_trackScore() < cut_trackScore) out.push_back(this_in);
   }
   return out;
 }

@@ -219,6 +219,7 @@ std::vector<Daughter> AnalyzerCore::GetAllDaughters(){
   vector<Daughter> out;
   for (size_t i = 0; i < evt.reco_daughter_allTrack_ID->size(); i++){
     if((*evt.reco_daughter_allTrack_dQdX_SCE)[i].empty()) continue;
+    //if((*evt.reco_daughter_dQdX_SCE)[i].empty()) continue; // == for new MC from Jake
 
     Daughter this_Daughter;
     //cout << "[PionXsec::GetAllDaughters] i : " << i << endl;
@@ -271,9 +272,14 @@ std::vector<Daughter> AnalyzerCore::GetAllDaughters(){
     this_Daughter.Set_allTrack_resRange_SCE((*evt.reco_daughter_allTrack_resRange_SCE).at(i));
     this_Daughter.Set_allTrack_resRange_SCE_plane0((*evt.reco_daughter_allTrack_resRange_plane0).at(i)); // == FIXME, to SCE
     this_Daughter.Set_allTrack_resRange_SCE_plane1((*evt.reco_daughter_allTrack_resRange_plane1).at(i)); // == FIXME, to SCE
+
+    // == commented out for Jake's new 0.5 GeV/c MC
+    /*
     this_Daughter.Set_allTrack_calibrated_dEdX_SCE((*evt.reco_daughter_allTrack_calibrated_dEdX_SCE).at(i));
     this_Daughter.Set_allTrack_calibrated_dEdX_SCE_plane0((*evt.reco_daughter_allTrack_calibrated_dEdX_SCE_plane0).at(i));
     this_Daughter.Set_allTrack_calibrated_dEdX_SCE_plane1((*evt.reco_daughter_allTrack_calibrated_dEdX_SCE_plane1).at(i));
+    */
+
     this_Daughter.Set_allTrack_Chi2_proton((*evt.reco_daughter_allTrack_Chi2_proton).at(i));
     this_Daughter.Set_allTrack_Chi2_pion((*evt.reco_daughter_allTrack_Chi2_pion).at(i));
     this_Daughter.Set_allTrack_Chi2_muon((*evt.reco_daughter_allTrack_Chi2_muon).at(i));
@@ -295,6 +301,17 @@ std::vector<Daughter> AnalyzerCore::GetAllDaughters(){
     this_Daughter.Set_allTrack_endZ((*evt.reco_daughter_allTrack_endZ).at(i));
     this_Daughter.Set_allTrack_vertex_michel_score((*evt.reco_daughter_allTrack_vertex_michel_score).at(i));
     this_Daughter.Set_allTrack_vertex_nHits((*evt.reco_daughter_allTrack_vertex_nHits).at(i));
+
+    this_Daughter.Set_allShower_ID((*evt.reco_daughter_allShower_ID).at(i));
+    this_Daughter.Set_allShower_len((*evt.reco_daughter_allShower_len).at(i));
+    this_Daughter.Set_allShower_startX((*evt.reco_daughter_allShower_startX).at(i));
+    this_Daughter.Set_allShower_startY((*evt.reco_daughter_allShower_startY).at(i));
+    this_Daughter.Set_allShower_startZ((*evt.reco_daughter_allShower_startZ).at(i));
+    this_Daughter.Set_allShower_dirX((*evt.reco_daughter_allShower_dirX).at(i));
+    this_Daughter.Set_allShower_dirY((*evt.reco_daughter_allShower_dirY).at(i));
+    this_Daughter.Set_allShower_dirZ((*evt.reco_daughter_allShower_dirZ).at(i));
+    this_Daughter.Set_allShower_energy((*evt.reco_daughter_allShower_energy).at(i));
+
     this_Daughter.Set_pandora_type((*evt.reco_daughter_pandora_type).at(i));
 
     TVector3 unit_daughter((*evt.reco_daughter_allTrack_endX).at(i) - (*evt.reco_daughter_allTrack_startX).at(i),
@@ -308,6 +325,10 @@ std::vector<Daughter> AnalyzerCore::GetAllDaughters(){
     double dist_beam_end = (reco_daughter_start - reco_beam_end).Mag();
     this_Daughter.Set_Beam_Dist(dist_beam_end);
 
+    TVector3 reco_daughter_start_allShower((*evt.reco_daughter_allShower_startX).at(i), (*evt.reco_daughter_allShower_startY).at(i), (*evt.reco_daughter_allShower_startZ).at(i) );
+    double dist_beam_end_allShower = (reco_daughter_start_allShower - reco_beam_end).Mag();
+    this_Daughter.Set_Beam_Dist_allShower(dist_beam_end_allShower);
+    
     out.push_back(this_Daughter);
   }
 
@@ -487,6 +508,39 @@ double AnalyzerCore::Get_true_ffKE(){
   }
 
   return KE_ff_true;
+}
+
+double AnalyzerCore::Get_true_beamlen(){
+
+  double beamlen_true = -9999.;
+  if(abs(evt.true_beam_PDG) != 13 && abs(evt.true_beam_PDG) != 211 & abs(evt.true_beam_PDG) != 2212) return beamlen_true;
+  int start_idx = -1;
+  for(int i_true_hit = 0; i_true_hit < (*evt.true_beam_traj_Z).size(); i_true_hit++){
+    if((*evt.true_beam_traj_Z).at(i_true_hit) >= 0){
+      start_idx = i_true_hit - 1;
+      if (start_idx < 0) start_idx = -1;
+      break;
+    }
+  }
+  if (start_idx >= 0){
+    beamlen_true = 0.;
+    for (int i_true_hit = start_idx + 1; i_true_hit < (*evt.true_beam_traj_Z).size(); i_true_hit++){
+      if (i_true_hit == start_idx+1) {
+        beamlen_true = sqrt( pow( (*evt.true_beam_traj_X).at(i_true_hit)-(*evt.true_beam_traj_X).at(i_true_hit-1), 2)
+                            + pow( (*evt.true_beam_traj_Y).at(i_true_hit)-(*evt.true_beam_traj_Y).at(i_true_hit-1), 2)
+                            + pow( (*evt.true_beam_traj_Z).at(i_true_hit)-(*evt.true_beam_traj_Z).at(i_true_hit-1), 2)
+                            ) * (*evt.true_beam_traj_Z).at(i_true_hit)/((*evt.true_beam_traj_Z).at(i_true_hit)-(*evt.true_beam_traj_Z).at(i_true_hit-1));
+      }
+      else{
+        beamlen_true += sqrt( pow( (*evt.true_beam_traj_X).at(i_true_hit)-(*evt.true_beam_traj_X).at(i_true_hit-1), 2)
+                             + pow( (*evt.true_beam_traj_Y).at(i_true_hit)-(*evt.true_beam_traj_Y).at(i_true_hit-1), 2)
+                             + pow( (*evt.true_beam_traj_Z).at(i_true_hit)-(*evt.true_beam_traj_Z).at(i_true_hit-1), 2)
+                             );
+      }
+    }
+  }
+
+  return beamlen_true;
 }
 
 void AnalyzerCore::SetPandoraSlicePDG(int pdg){
@@ -879,7 +933,7 @@ void AnalyzerCore::Init(){
   cout << "[[AnalyzerCore::Init]] Called Profiles" << endl;
 
   // == Beam Window cut
-  if(!IsData) P_beam_inst_scale = Beam_Momentum;
+  if(!IsData) P_beam_inst_scale = 1.; // FIXME: Jake's additional MC sample has various weights
   beam_momentum_low = Beam_Momentum * 1000. * 0.8;
   beam_momentum_high = Beam_Momentum * 1000. * 1.2;
   cout << "[[AnalyzerCore::Init]] Called beam window cuts ["  << beam_momentum_low << ", " << beam_momentum_high << "]" << endl;
@@ -930,13 +984,14 @@ void AnalyzerCore::Init_evt(){
     beam_TPC_phi = dir.Phi();
     delta_X_spec_TPC = evt.beam_inst_X - evt.reco_beam_calo_startX;
     delta_Y_spec_TPC = evt.beam_inst_Y - evt.reco_beam_calo_startY;
+
     TVector3 spec_dir(evt.beam_inst_dirX, evt.beam_inst_dirY, evt.beam_inst_dirZ);
     spec_dir = spec_dir.Unit();
     cos_delta_spec_TPC = dir.Dot(spec_dir);
 
     chi2_proton = evt.reco_beam_Chi2_proton/evt.reco_beam_Chi2_ndof;
-    chi2_pion = Particle_chi2( (*evt.reco_beam_calibrated_dEdX_SCE), (*evt.reco_beam_resRange_SCE), 211, 1.);
-    chi2_muon = Particle_chi2( (*evt.reco_beam_calibrated_dEdX_SCE), (*evt.reco_beam_resRange_SCE), 13, 1.);
+    //chi2_pion = Particle_chi2( (*evt.reco_beam_calibrated_dEdX_SCE), (*evt.reco_beam_resRange_SCE), 211, 1.);
+    //chi2_muon = Particle_chi2( (*evt.reco_beam_calibrated_dEdX_SCE), (*evt.reco_beam_resRange_SCE), 13, 1.);
   }
 }
 

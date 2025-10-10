@@ -88,10 +88,20 @@ public:
   void Set_allTrack_endZ(double i_allTrack_endZ);
   void Set_allTrack_vertex_michel_score(double i_allTrack_vertex_michel_score);
   void Set_allTrack_vertex_nHits(int i_allTrack_vertex_nHits);
+  void Set_allShower_ID(int i_allShower_ID);
+  void Set_allShower_len(double i_allShower_len);
+  void Set_allShower_startX(double i_allShower_startX);
+  void Set_allShower_startY(double i_allShower_startY);
+  void Set_allShower_startZ(double i_allShower_startZ);
+  void Set_allShower_dirX(double i_allShower_dirX);
+  void Set_allShower_dirY(double i_allShower_dirY);
+  void Set_allShower_dirZ(double i_allShower_dirZ);
+  void Set_allShower_energy(double i_allShower_energy);
   void Set_pandora_type(int i_pandora_type);
-  void Set_Beam_Cos(double j_Beam_Cos);
-  void Set_Beam_Dist(double j_Beam_Dist);
-
+  void Set_Beam_Cos(double i_Beam_Cos);
+  void Set_Beam_Dist(double i_Beam_Dist);
+  void Set_Beam_Dist_allShower(double i_Beam_Dist_allShower); 
+  
   inline int PFP_true_byHits_PDG() const { return j_PFP_true_byHits_PDG; }
   inline int PFP_true_byHits_ID() const { return j_PFP_true_byHits_ID; }
   inline int PFP_true_byHits_origin() const { return j_PFP_true_byHits_origin; }
@@ -160,10 +170,21 @@ public:
   inline double allTrack_endZ() const { return j_allTrack_endZ; }
   inline double allTrack_vertex_michel_score() const { return j_allTrack_vertex_michel_score; }
   inline int allTrack_vertex_nHits() const { return j_allTrack_vertex_nHits; }
+  inline int allShower_ID() const { return j_allShower_ID; }
+  inline double allShower_len() const { return j_allShower_len; }
+  inline double allShower_startX() const { return j_allShower_startX; }
+  inline double	allShower_startY() const { return j_allShower_startY; }
+  inline double	allShower_startZ() const { return j_allShower_startZ; }
+  inline double	allShower_dirX() const { return j_allShower_dirX; }
+  inline double allShower_dirY() const { return j_allShower_dirY; }
+  inline double allShower_dirZ() const { return j_allShower_dirZ; }
+  inline double allShower_energy() const { return j_allShower_energy; }
   inline int pandora_type() const { return j_pandora_type; }
   inline double Beam_Cos() const { return j_Beam_Cos; }
   inline double Beam_Dist() const { return j_Beam_Dist; }
+  inline double Beam_Dist_allShower() const { return j_Beam_Dist_allShower; }
 
+  
 private:
   bool j_IsEmpty;
 
@@ -235,10 +256,19 @@ private:
   double j_allTrack_endZ;
   double j_allTrack_vertex_michel_score;
   int j_allTrack_vertex_nHits;
-
+  int j_allShower_ID;
+  double j_allShower_len;
+  double j_allShower_startX;
+  double j_allShower_startY;
+  double j_allShower_startZ;
+  double j_allShower_dirX;
+  double j_allShower_dirY;
+  double j_allShower_dirZ;
+  double j_allShower_energy;
   int j_pandora_type;
   double j_Beam_Cos;
   double j_Beam_Dist;
+  double j_Beam_Dist_allShower;
 };
 
 #endif

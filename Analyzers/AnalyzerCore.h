@@ -141,6 +141,7 @@ public:
   double KE_end_reco = -999.;
   double E_end_reco = -999.;
   double Get_true_ffKE();
+  double Get_true_beamlen();
   double P_ff_true = -999.;
   double KE_ff_true = -999.;
   //double KE_ff_true = -999.;
