@@ -9,6 +9,6 @@ lib/*.tar.gz
 *~
 build/
 run_pionbeamsel_BKP20260306.C
-
+'mf[PDSPTreeAnalyzer][git:PDSPTreeAnalyzer:sungbino_new_0p5gev_mc]:'
 hists_*.root
 tar/

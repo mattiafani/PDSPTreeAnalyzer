@@ -185,7 +185,7 @@ void DrawPlot(TFile* fMC, TFile* fData,
     hData->SetMarkerSize(0.8);
     hData->SetLineColor(kBlack);
 
-    // -- Canvas with two pads
+    // -- Canvas, two pads
     TCanvas* c = new TCanvas("c", "", 800, 700);
     TPad* pad1 = new TPad("pad1", "", 0., 0.28, 1., 1.);
     TPad* pad2 = new TPad("pad2", "", 0., 0., 1., 0.28);
@@ -209,21 +209,21 @@ void DrawPlot(TFile* fMC, TFile* fData,
     stack->GetYaxis()->SetTitleOffset(1.0);
     stack->GetYaxis()->SetLabelSize(0.05);
 
-    // compute ymax in the visible range
+    //
     hData->GetXaxis()->SetRangeUser(axMin, axMax);
     hMC_total->GetXaxis()->SetRangeUser(axMin, axMax);
     double ymax = std::max(hData->GetMaximum(), hMC_total->GetMaximum());
     hData->GetXaxis()->UnZoom();
     hMC_total->GetXaxis()->UnZoom();
 
-    // leave enough room for the legend inside the plot
+    //
     stack->SetMaximum(ymax * 2.2);
     stack->SetMinimum(0.);
 
     if (varname == "Beam_delta_X_spec_TPC") hData->GetXaxis()->SetRangeUser(-30, 30);
     hData->Draw("E1 SAME");
 
-    // -- Legend inside plot, top area, 4 columns
+    // -- Legend, 4 columns
     TLegend* leg = new TLegend(0.12, 0.6, 0.92, 0.88);
     leg->SetNColumns(4);
     leg->SetBorderSize(0);
@@ -239,7 +239,7 @@ void DrawPlot(TFile* fMC, TFile* fData,
         double pct = (mcSumScaled > 0) ? 100. * integ / mcSumScaled : 0.;
         leg->AddEntry(h, Form("#bf{%s %.1f, (%.1f %%)}", catName[cat], integ, pct), "f");
     }
-    // MC Sum and Observed as last two entries
+    // MC Sum and Observed
     leg->AddEntry((TObject*)nullptr, Form("MC Sum %.1f", mcSumScaled), "");
     leg->AddEntry(hData, Form("Observed %.0f", dataIntegral), "lep");
     leg->Draw();
@@ -278,12 +278,12 @@ void DrawPlot(TFile* fMC, TFile* fData,
     pad2->cd();
     pad2->SetTicks(1, 1);
 
-    // Build ratio manually bin-by-bin to preserve Poisson errors on data
+    // Build ratio
     TH1D* hRatio = (TH1D*)hData->Clone("hRatio");
     hRatio->SetDirectory(0);
     hRatio->Reset();
 
-    // Make sure both have same binning for division
+    //
     TH1D* hMC_forRatio = (TH1D*)hMC_total->Clone("hMC_forRatio");
     hMC_forRatio->SetDirectory(0);
 
