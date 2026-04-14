@@ -7,3 +7,8 @@ lib/*.tar.gz
 */obj
 *.png
 *~
+build/
+run_pionbeamsel_BKP20260306.C
+
+hists_*.root
+tar/

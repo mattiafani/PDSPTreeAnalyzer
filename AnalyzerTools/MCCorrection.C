@@ -19,7 +19,7 @@ void MCCorrection::ReadHistograms(){
   TString MomentumReweight_path_xrootd = "/Users/sungbino/OneDrive/OneDrive/ProtoDUNE-SP/PionKI/PDSPTreeAnalyzer/data/v1/Momentum_reweight/";
   TString is_dunegpvm_str = getenv("PDSPAna_isdunegpvm");
   if(is_dunegpvm_str == "TRUE"){
-    MomentumReweight_path_xrootd = "xroot://fndca1.fnal.gov:1094/pnfs/fnal.gov/usr/dune/persistent/users/sungbino/PDSP_data/Momentum_reweight/";
+    MomentumReweight_path_xrootd = TString(getenv("PDSPAna_WD")) + "/data/v1/Momentum_reweight/";
   }
   
   cout << "[MCCorrection::ReadHistograms] MomentumReweight_path  : " << MomentumReweight_path << endl;
@@ -58,7 +58,7 @@ void MCCorrection::ReadHistograms(){
 
   TString SCE_map_path_xrootd = "/Users/sungbino/OneDrive/OneDrive/ProtoDUNE-SP/PionKI/PDSPTreeAnalyzer/data/v1/SCE/SCE_DataDriven_180kV_v4.root";
   if(is_dunegpvm_str == "TRUE"){
-    SCE_map_path_xrootd = "xroot://fndca1.fnal.gov:1094/pnfs/fnal.gov/usr/dune/persistent/users/sungbino/PDSP_data/SCE/SCE_DataDriven_180kV_v4.root";
+    SCE_map_path_xrootd = TString(getenv("PDSPAna_WD")) + "/data/v1/SCE/SCE_DataDriven_180kV_v4.root";
   }
 
   cout << "[MCCorrection::ReadHistograms] SCE_map_path_xrootd : " << SCE_map_path_xrootd << endl;

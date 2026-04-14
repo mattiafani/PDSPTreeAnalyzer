@@ -19,7 +19,7 @@ void GEANT4_XS::ReadHistograms(){
   TString Xsec_path_xrootd = "/Users/sungbino/OneDrive/OneDrive/ProtoDUNE-SP/PionKI/PDSPTreeAnalyzer/data/v1/GEANT4_XS/";
   TString is_dunegpvm_str = getenv("PDSPAna_isdunegpvm");
   if(is_dunegpvm_str == "TRUE"){
-    Xsec_path_xrootd = "xroot://fndca1.fnal.gov:1094/pnfs/fnal.gov/usr/dune/persistent/users/sungbino/PDSP_data/GEANT4_XS/";
+    Xsec_path_xrootd = TString(getenv("PDSPAna_WD")) + "/data/v1/GEANT4_XS/";
   }
 
   cout << "[GEANT4_XS::ReadHistograms] Open : " << Xsec_path+"histmap.txt" << endl;

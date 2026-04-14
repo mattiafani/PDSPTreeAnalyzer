@@ -11,7 +11,7 @@ export PDSPAnaGridOutDir="/pnfs/dune/scratch/users/$USER/PDSP_out"
 mkdir -p $PDSPAnaGridOutDir
 
 #### USER INFO ####
-export PDSPAnaLogEmail='sungbino@fnal.gov'
+export PDSPAnaLogEmail='your_email@cern.ch'
 export PDSPAnaLogWeb=''
 export PDSPAnaLogWebDir=''
 

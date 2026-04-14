@@ -922,7 +922,8 @@ void AnalyzerCore::Init(){
   TString datapath_xrootd = "/Users/sungbino/OneDrive/OneDrive/ProtoDUNE-SP/PionKI/PDSPTreeAnalyzer/data/v1/";
   TString is_dunegpvm_str = getenv("PDSPAna_isdunegpvm");
   if(is_dunegpvm_str == "TRUE"){
-    datapath_xrootd = "xroot://fndca1.fnal.gov:1094/pnfs/fnal.gov/usr/dune/persistent/users/sungbino/PDSP_data/";
+    //datapath_xrootd = TString(getenv("PDSPAna_WD")) + "/data/v1/";
+    datapath_xrootd = TString(getenv("PDSPAna_WD")) + "/data/v1/";
   }
   cout << "[AnalyzerCore::Init] Open : " << datapath_xrootd << endl;
   TFile *file_profile = TFile::Open(datapath_xrootd + "/dEdx_profiles/dEdxrestemplates.root");
@@ -933,7 +934,9 @@ void AnalyzerCore::Init(){
   cout << "[[AnalyzerCore::Init]] Called Profiles" << endl;
 
   // == Beam Window cut
-  if(!IsData) P_beam_inst_scale = 1.; // FIXME: Jake's additional MC sample has various weights
+  // MF 20260319
+  // if(!IsData) P_beam_inst_scale = 1.; // FIXME: Jake's additional MC sample has various weights
+  if(!IsData) P_beam_inst_scale = 0.5; // MC beam_inst_P branch has factor 2 bug, reweight by 0.5
   beam_momentum_low = Beam_Momentum * 1000. * 0.8;
   beam_momentum_high = Beam_Momentum * 1000. * 1.2;
   cout << "[[AnalyzerCore::Init]] Called beam window cuts ["  << beam_momentum_low << ", " << beam_momentum_high << "]" << endl;
