@@ -24,7 +24,7 @@
 // Suffix 0  = Data
 // Suffix 1-13 = MC truth categories
 // ============================================================
-const bool DEBUG = true;
+const bool DEBUG = false;
 const int NCAT = 13;
 const char* catName[NCAT + 1] = {
     "Data",
@@ -39,7 +39,9 @@ const int catColor[NCAT + 1] = {
 struct PlotDef {
     TString dir, var, xtitle, outname;
     double xmin, xmax;
-    int rebin;
+    // nbins: number of uniform bins over [xmin, xmax].
+    // Set to 0 to keep the original histogram binning.
+    int nbins;
 };
 
 // ============================================================
@@ -72,15 +74,138 @@ TH1D* GetHistMC(TFile* f, TString dir, TString prefix, int cat) {
 }
 
 // ============================================================
+// Apply binning from a PlotDef to a histogram.
+// If nbins > 0: rehistogram into nbins uniform bins over [xmin, xmax].
+// If nbins == 0: return the histogram unchanged.
+// ============================================================
+TH1D* ApplyBinning(TH1D* h, const PlotDef& p, const char* newname) {
+    if (p.nbins > 0 && p.xmax > p.xmin) {
+        TH1D* hNew = new TH1D(newname, h->GetTitle(),
+                              p.nbins, p.xmin, p.xmax);
+        hNew->SetDirectory(0);
+        for (int b = 1; b <= h->GetNbinsX(); b++) {
+            double x = h->GetBinCenter(b);
+            double val = h->GetBinContent(b);
+            double err = h->GetBinError(b);
+            int nb = hNew->FindBin(x);
+            if (nb < 1 || nb > hNew->GetNbinsX()) continue;
+            hNew->SetBinContent(nb, hNew->GetBinContent(nb) + val);
+            hNew->SetBinError(nb, TMath::Sqrt(
+                                      hNew->GetBinError(nb) * hNew->GetBinError(nb) + err * err));
+        }
+        hNew->SetFillColor(h->GetFillColor());
+        hNew->SetLineColor(h->GetLineColor());
+        hNew->SetLineWidth(h->GetLineWidth());
+        hNew->SetMarkerStyle(h->GetMarkerStyle());
+        hNew->SetMarkerSize(h->GetMarkerSize());
+        delete h;
+        return hNew;
+    }
+    return h;  // nbins == 0: keep original binning
+}
+
+///////////////
+
+// ============================================================
+// Compute a single MC->data scale factor from a chosen base
+// selection stage and variable.
+//
+// dir : ROOT directory in the histogram file, e.g. "Beam_scraper"
+// var : branch name fragment, e.g. "Beam_P_beam_inst"
+//
+// Opens dir/dir_var_1 ... dir_var_13 (MC categories), sums them
+// into a total MC histogram, then returns:
+//
+//   scale = hData->Integral() / hMCTotal->Integral()
+//
+// over the full histogram range.  Returns 1.0 with a warning if
+// the histograms are not found or the MC integral is zero.
+// ============================================================
+double ComputeGlobalScale(TFile* fMC, TFile* fData,
+                          TString dir, TString var, double xmin = -1., double xmax = -1.) {
+    TString prefix = dir + "_" + var;
+
+    // --- data
+    TDirectory* dData = (TDirectory*)fData->Get(dir);
+    if (!dData) {
+        printf("ComputeGlobalScale WARNING: directory '%s' not found in data file\n",
+               dir.Data());
+        return 1.0;
+    }
+    TH1D* hData = (TH1D*)dData->Get(prefix);
+    if (!hData) hData = (TH1D*)dData->Get(prefix + "_0");
+    if (!hData) {
+        printf("ComputeGlobalScale WARNING: histogram '%s' not found in data file\n",
+               prefix.Data());
+        return 1.0;
+    }
+    hData->SetDirectory(0);
+    // double dataIntegral = hData->Integral();
+    double dataIntegral, mcIntegral = 0.;
+    if (xmax > xmin) {
+        int b1 = hData->FindBin(xmin);
+        int b2 = hData->FindBin(xmax) - 1;
+        dataIntegral = hData->Integral(b1, b2);
+    } else {
+        dataIntegral = hData->Integral();
+    }
+    delete hData;
+
+    // --- MC: sum all 13 categories
+    TDirectory* dMC = (TDirectory*)fMC->Get(dir);
+    if (!dMC) {
+        printf("ComputeGlobalScale WARNING: directory '%s' not found in MC file\n",
+               dir.Data());
+        return 1.0;
+    }
+    // double mcIntegral = 0.;
+    // for (int i = 1; i <= 13; i++) {
+    //     TH1D* h = (TH1D*)dMC->Get(prefix + Form("_%d", i));
+    //     if (!h) continue;
+    //     h->SetDirectory(0);
+    //     mcIntegral += h->Integral();
+    //     delete h;
+    // }
+    for (int i = 1; i <= 13; i++) {
+        TH1D* h = (TH1D*)dMC->Get(prefix + Form("_%d", i));
+        if (!h) continue;
+        h->SetDirectory(0);
+        if (xmax > xmin) {
+            int b1 = h->FindBin(xmin);
+            int b2 = h->FindBin(xmax) - 1;
+            mcIntegral += h->Integral(b1, b2);
+        } else {
+            mcIntegral += h->Integral();
+        }
+        delete h;
+    }
+    if (mcIntegral <= 0.) {
+        printf("ComputeGlobalScale WARNING: MC integral is zero for '%s/%s'\n",
+               dir.Data(), var.Data());
+        return 1.0;
+    }
+
+    double scale = dataIntegral / mcIntegral;
+    printf("ComputeGlobalScale: dir=%s  var=%s  data=%.1f  MC=%.1f  scale=%.4f\n",
+           dir.Data(), var.Data(), dataIntegral, mcIntegral, scale);
+    return scale;
+}
+
+///////////////
+
+// ============================================================
 // Main plotting function
+// normalize: true  = scale MC to data (original behaviour)
+//            false = raw counts, no scaling
 // xmin, xmax: set to -1 to use histogram defaults
-// rebin: set to 1 to keep original binning
 // ============================================================
 void DrawPlot(TFile* fMC, TFile* fData,
               TString dir, TString varname,
               TString xtitle, TString outname,
               double xmin = -1, double xmax = -1,
-              int rebin = 1,
+              const PlotDef* pdef = nullptr,
+              bool normalize = true,
+              double fixedScale = -1.,
               TString plotdir = "plots",
               TFile* fOut = nullptr) {
     vector<pair<TString, TString>> allCuts = {
@@ -130,7 +255,7 @@ void DrawPlot(TFile* fMC, TFile* fData,
     for (int i = 1; i <= NCAT; i++) {
         TH1D* h = GetHistMC(fMC, dir, prefix, i);
         if (!h) continue;
-        if (rebin > 1) h->Rebin(rebin);
+        if (pdef) h = ApplyBinning(h, *pdef, Form("hMC_%d", i));
         h->SetFillColor(catColor[i]);
         h->SetLineColor(catColor[i]);
         h->SetLineWidth(1);
@@ -151,27 +276,40 @@ void DrawPlot(TFile* fMC, TFile* fData,
         return;
     }
 
-    // -- Apply rebin to Data too
-    if (rebin > 1) hData->Rebin(rebin);
+    // -- Apply binning to Data
+    if (pdef) hData = ApplyBinning(hData, *pdef, "hData_binned");
 
-    // -- Normalize MC to Data
-    double dataIntegral, mcIntegral;
+    // -- Normalize MC to Data (or keep raw counts)
+    double dataIntegral, mcIntegral, scale;
     if (xmax > xmin) {
         int b1 = hData->FindBin(xmin);
         int b2 = hData->FindBin(xmax) - 1;
         dataIntegral = hData->Integral(b1, b2);
         mcIntegral = hMC_total->Integral(b1, b2);
-        if (mcIntegral != dataIntegral) {
-            // Handle the case where integrals don't match
-            printf(" !!! WARNING !!! Integrals don't match for %s/%s\n", dir.Data(), varname.Data());
-            printf("  Data: %.2f, MC: %.2f\n", dataIntegral, mcIntegral);
-        }
-
     } else {
         dataIntegral = hData->Integral();
         mcIntegral = hMC_total->Integral();
     }
-    double scale = (mcIntegral > 0) ? dataIntegral / mcIntegral : 1.;
+
+    // if (normalize) {
+    //     scale = (mcIntegral > 0) ? dataIntegral / mcIntegral : 1.;
+    //     if (mcIntegral != dataIntegral)
+    //         printf(" !!! WARNING !!! Integrals don't match for %s/%s — Data: %.2f, MC: %.2f\n",
+    //                dir.Data(), varname.Data(), dataIntegral, mcIntegral);
+    // } else {
+    //     scale = 1.;  // raw counts — no scaling applied
+    // }
+
+    if (!normalize) {
+        scale = 1.;
+    } else if (fixedScale > 0.) {
+        scale = fixedScale;  // global scale from ComputeGlobalScale()
+    } else {
+        scale = (mcIntegral > 0) ? dataIntegral / mcIntegral : 1.;
+        printf(" !!! WARNING !!! No fixed scale provided — falling back to per-plot normalisation for %s/%s\n",
+               dir.Data(), varname.Data());
+    }
+
     for (auto& p : hMC_cat) p.second->Scale(scale);
     hMC_total->Scale(scale);
     double mcSumScaled = hMC_total->Integral();
@@ -204,7 +342,7 @@ void DrawPlot(TFile* fMC, TFile* fData,
     stack->GetXaxis()->SetRangeUser(axMin, axMax);
     stack->GetXaxis()->SetLabelSize(0);
     stack->GetXaxis()->SetTitleSize(0);
-    stack->GetYaxis()->SetTitle("Events");
+    stack->GetYaxis()->SetTitle(normalize ? "Events" : "Raw counts");
     stack->GetYaxis()->SetTitleSize(0.055);
     stack->GetYaxis()->SetTitleOffset(1.0);
     stack->GetYaxis()->SetLabelSize(0.05);
@@ -231,17 +369,25 @@ void DrawPlot(TFile* fMC, TFile* fData,
     leg->SetTextSize(0.025);
     leg->SetMargin(0.12);
 
-    // Add MC categories in stack order (bottom first = PiElas first)
+    // Add MC categories in stack order
     for (int i = 0; i < (int)hMC_cat.size(); i++) {
         int cat = hMC_cat[i].first;
         TH1D* h = hMC_cat[i].second;
         double integ = h->Integral();
         double pct = (mcSumScaled > 0) ? 100. * integ / mcSumScaled : 0.;
-        leg->AddEntry(h, Form("#bf{%s %.1f, (%.1f %%)}", catName[cat], integ, pct), "f");
+        if (normalize)
+            leg->AddEntry(h, Form("#bf{%s %.1f, (%.1f %%)}", catName[cat], integ, pct), "f");
+        else
+            leg->AddEntry(h, Form("#bf{%s %.0f, (%.1f %%)}", catName[cat], integ, pct), "f");
     }
     // MC Sum and Observed
-    leg->AddEntry((TObject*)nullptr, Form("MC Sum %.1f", mcSumScaled), "");
-    leg->AddEntry(hData, Form("Observed %.0f", dataIntegral), "lep");
+    if (normalize) {
+        leg->AddEntry((TObject*)nullptr, Form("MC Sum %.1f", mcSumScaled), "");
+        leg->AddEntry(hData, Form("Observed %.0f", dataIntegral), "lep");
+    } else {
+        leg->AddEntry((TObject*)nullptr, Form("MC Raw %.0f", mcSumScaled), "");
+        leg->AddEntry(hData, Form("Data %.0f", dataIntegral), "lep");
+    }
     leg->Draw();
 
     // -- Labels
@@ -334,13 +480,20 @@ void DrawPlot(TFile* fMC, TFile* fData,
 
     if (fOut) {
         fOut->cd();
+        // Save canvas in a subdirectory named after the mode
+        TString modedir = normalize ? "normalized" : "raw";
+        if (!fOut->GetDirectory(modedir))
+            fOut->mkdir(modedir);
+        fOut->cd(modedir);
         c->Write(outname);
+        fOut->cd();
     }
 
-    // -- Save
+    // -- Save PDF — append _raw suffix for raw-count version
+    TString pdfName = normalize ? outname : outname + "_raw";
     gSystem->mkdir(plotdir, kTRUE);
-    c->SaveAs(Form("%s/%s.pdf", plotdir.Data(), outname.Data()));
-    printf("Saved: %s/%s.pdf\n\n", plotdir.Data(), outname.Data());
+    c->SaveAs(Form("%s/%s.pdf", plotdir.Data(), pdfName.Data()));
+    printf("Saved: %s/%s.pdf\n\n", plotdir.Data(), pdfName.Data());
 
     delete hRatio;
     delete c;
@@ -404,113 +557,127 @@ void plot_beamsel() {
         return;
     }
 
-    std::vector<PlotDef>
-        plots = {
-            // After PID cut
-            {"Beam_PID", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "01_BeamPID_Pbeam", 350., 700., 8},
-            {"Beam_PID", "Beam_endZ", "Z_{end}^{beam} [cm]", "01_BeamPID_endZ", -100., 400., 8},
-            {"Beam_PID", "Beam_Z_dir_sign", "Z_{end}^{beam} [cm]", "01_BeamPID_Z_dir_sign", -100., 400., 8},
-            {"Beam_PID", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "01_BeamPID_trkLenRatio", -1., 2., 12},
-            {"Beam_PID", "Beam_reco_as_trk", "Beam reco. as Track", "01_BeamPID_recoastrk", -1., 1., 1},
-            {"Beam_PID", "Beam_calo_size", "Has collection plane cluster", "01_Beam_PID_calosize", -1., 1., 1},
-            {"Beam_PID", "Beam_chi2_proton", "#chi^{2}_{p}", "01_BeamPID_chi2p", 0., 400., 64},
-            {"Beam_PID", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "01_BeamPID_deltaX", -30., 30., 16},
-            {"Beam_PID", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "01_BeamPID_deltaY", -30., 30., 16},
-            {"Beam_PID", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "01_BeamPID_deltaX_sigma", -5., 5., 16},
-            {"Beam_PID", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "01_BeamPID_deltaY_sigma", -5., 5., 16},
-            {"Beam_PID", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "01_BeamPID_KEff", 0., 600., 8},
-            {"Beam_PID", "Beam_KELoss", "#DeltaE_{k} [MeV]", "01_BeamPID_KELoss", -60., 100., 25},
-            // After beam scraper cut
-            {"Beam_scraper", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "02_BeamScraper_Pbeam", 350., 650., 16},
-            {"Beam_scraper", "Beam_endZ", "Z_{end}^{beam} [cm]", "02_BeamScraper_endZ", -100., 400., 8},
-            {"Beam_scraper", "Beam_Z_dir_sign", "Z_{end}^{beam} [cm]", "02_BeamScraper_Z_dir_sign", -100., 400., 8},
-            {"Beam_scraper", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "02_BeamScraper_trkLenRatio", 0., 2., 8},
-            {"Beam_scraper", "Beam_reco_as_trk", "Beam reco. as Track", "02_BeamScraper_recoastrk", -1., 1., 1},
-            {"Beam_scraper", "Beam_calo_size", "Has collection plane cluster", "02_Beam_Scraper_calosize", -1., 1., 1},
-            {"Beam_scraper", "Beam_chi2_proton", "#chi^{2}_{p}", "02_BeamScraper_chi2p", 0., 400., 64},
-            {"Beam_scraper", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "02_BeamScraper_deltaX", -30., 30., 16},
-            {"Beam_scraper", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "02_BeamScraper_deltaY", -30., 30., 16},
-            {"Beam_scraper", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "02_BeamScraper_deltaX_sigma", -5., 5., 16},
-            {"Beam_scraper", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "02_BeamScraper_deltaY_sigma", -5., 5., 16},
-            {"Beam_scraper", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "02_BeamScraper_KEff", 0., 600., 8},
-            {"Beam_scraper", "Beam_KELoss", "#DeltaE_{k} [MeV]", "02_BeamScraper_KELoss", -60., 100., 25},
-            // After collection hits cut
-            {"Beam_collhits", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "03_BeamCollhits_Pbeam", 350., 650., 16},
-            {"Beam_collhits", "Beam_endZ", "Z_{end}^{beam} [cm]", "03_BeamCollhits_endZ", -100., 400., 8},
-            {"Beam_collhits", "Beam_Z_dir_sign", "Z_{end}^{beam} [cm]", "03_BeamCollhits_Z_dir_sign", -100., 400., 8},
-            {"Beam_collhits", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "03_BeamCollhits_trkLenRatio", 0., 2., 8},
-            {"Beam_collhits", "Beam_reco_as_trk", "Beam reco. as Track", "03_BeamCollhits_recoastrk", -1., 1., 1},
-            {"Beam_collhits", "Beam_calo_size", "Has collection plane cluster", "03_BeamCollhits_calosize", -1., 1., 1},
-            {"Beam_collhits", "Beam_chi2_proton", "#chi^{2}_{p}", "03_BeamCollhits_chi2p", 0., 400., 64},
-            {"Beam_collhits", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "03_BeamCollhits_deltaX", -30., 30., 16},
-            {"Beam_collhits", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "03_BeamCollhits_deltaY", -30., 30., 16},
-            {"Beam_collhits", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "03_BeamCollhits_deltaX_sigma", -5., 5., 16},
-            {"Beam_collhits", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "03_BeamCollhits_deltaY_sigma", -5., 5., 16},
-            {"Beam_collhits", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "03_BeamCollhits_KEff", 0., 600., 8},
-            {"Beam_collhits", "Beam_KELoss", "#DeltaE_{k} [MeV]", "03_BeamCollhits_KELoss", -60., 100., 25},
-            // After reco track cut
-            {"Beam_recotrk", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "04_BeamRecotrk_Pbeam", 350., 650., 16},
-            {"Beam_recotrk", "Beam_endZ", "Z_{end}^{beam} [cm]", "04_BeamRecotrk_endZ", -100., 400., 8},
-            {"Beam_recotrk", "Beam_Z_dir_sign", "Z_{end}^{beam} [cm]", "04_BeamRecotrk_Z_dir_sign", -100., 400., 8},
-            {"Beam_recotrk", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "04_BeamRecotrk_trkLenRatio", 0., 2., 8},
-            {"Beam_recotrk", "Beam_reco_as_trk", "Beam reco. as Track", "04_BeamRecotrk_recoastrk", -1., 1., 1},
-            {"Beam_recotrk", "Beam_calo_size", "Has collection plane cluster", "04_BeamRecotrk_calosize", -1., 1., 1},
-            {"Beam_recotrk", "Beam_chi2_proton", "#chi^{2}_{p}", "04_BeamRecotrk_chi2p", 0., 400., 64},
-            {"Beam_recotrk", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "04_BeamRecotrk_deltaX", -30., 30., 16},
-            {"Beam_recotrk", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "04_BeamRecotrk_deltaY", -30., 30., 16},
-            {"Beam_recotrk", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "04_BeamRecotrk_deltaX_sigma", -5., 5., 16},
-            {"Beam_recotrk", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "04_BeamRecotrk_deltaY_sigma", -5., 5., 16},
-            {"Beam_recotrk", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "04_BeamRecotrk_KEff", 0., 600., 8},
-            {"Beam_recotrk", "Beam_KELoss", "#DeltaE_{k} [MeV]", "04_BeamRecotrk_KELoss", -60., 100., 25},
-            // After endZ cut
-            {"Beam_endZ", "Beam_KE_end", "E_{K}^{End} [MeV]", "05_BeamEndZ_KEend", 0., 600., 16},
-            {"Beam_endZ", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "05_BeamEndZ_Pbeam", 350., 650., 16},
-            {"Beam_endZ", "Beam_endZ", "Z_{end}^{beam} [cm]", "05_BeamEndZ_endZ", -100., 400., 8},
-            {"Beam_endZ", "Beam_Z_dir_sign", "Z_{end}^{beam} [cm]", "05_BeamEndZ_Z_dir_sign", -100., 400., 8},
-            {"Beam_endZ", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "05_BeamEndZ_trkLenRatio", 0., 2., 8},
-            {"Beam_endZ", "Beam_reco_as_trk", "Beam reco. as Track", "05_BeamEndZ_recoastrk", -1., 1., 1},
-            {"Beam_endZ", "Beam_calo_size", "Has collection plane cluster", "05_BeamEndZ_calosize", -1., 1., 1},
-            {"Beam_endZ", "Beam_chi2_proton", "#chi^{2}_{p}", "05_BeamEndZ_chi2p", 0., 400., 64},
-            {"Beam_endZ", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "05_BeamEndZ_deltaX", -30., 30., 16},
-            {"Beam_endZ", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "05_BeamEndZ_deltaY", -30., 30., 16},
-            {"Beam_endZ", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "05_BeamEndZ_deltaX_sigma", -5., 5., 16},
-            {"Beam_endZ", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "05_BeamEndZ_deltaY_sigma", -5., 5., 16},
-            {"Beam_endZ", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "05_BeamEndZ_KEff", 0., 600., 8},
-            {"Beam_endZ", "Beam_KELoss", "#DeltaE_{k} [MeV]", "05_BeamEndZ_KELoss", -60., 100., 25},
-            // After deltaXY cut
-            {"Beam_deltaXY", "Beam_KE_end", "E_{K}^{End} [MeV]", "06_BeamDeltaXY_KEend", 0., 600., 16},
-            {"Beam_deltaXY", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "06_BeamDeltaXY_Pbeam", 350., 650., 16},
-            {"Beam_deltaXY", "Beam_endZ", "Z_{end}^{beam} [cm]", "06_BeamDeltaXY_endZ", -100., 400., 8},
-            {"Beam_deltaXY", "Beam_Z_dir_sign", "Z_{end}^{beam} [cm]", "06_BeamDeltaXY_Z_dir_sign", -100., 400., 8},
-            {"Beam_deltaXY", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "06_BeamDeltaXY_trkLenRatio", 0., 2., 8},
-            {"Beam_deltaXY", "Beam_reco_as_trk", "Beam reco. as Track", "06_BeamDeltaXY_recoastrk", -1., 1., 1},
-            {"Beam_deltaXY", "Beam_calo_size", "Has collection plane cluster", "06_BeamDeltaXY_calosize", -1., 1., 1},
-            {"Beam_deltaXY", "Beam_chi2_proton", "#chi^{2}_{p}", "06_BeamDeltaXY_chi2p", 0., 400., 64},
-            {"Beam_deltaXY", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "06_BeamDeltaXY_deltaX", -30., 30., 16},
-            {"Beam_deltaXY", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "06_BeamDeltaXY_deltaY", -30., 30., 16},
-            {"Beam_deltaXY", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "06_BeamDeltaXY_deltaX_sigma", -5., 5., 16},
-            {"Beam_deltaXY", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "06_BeamDeltaXY_deltaY_sigma", -5., 5., 16},
-            {"Beam_deltaXY", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "06_BeamDeltaXY_KEff", 0., 600., 8},
-            {"Beam_deltaXY", "Beam_KELoss", "#DeltaE_{k} [MeV]", "06_BeamDeltaXY_KELoss", -60., 100., 25},
-            // After chi2 cut
-            {"Beam_chi2proton", "Beam_KE_end", "E_{K}^{End} [MeV]", "07_BeamChi2p_KEend", 0., 600., 8},
-            {"Beam_chi2proton", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "07_BeamChi2p_Pbeam", 350., 650., 16},
-            {"Beam_chi2proton", "Beam_endZ", "Z_{end}^{beam} [cm]", "07_BeamChi2p_endZ", -100., 400., 8},
-            {"Beam_chi2proton", "Beam_Z_dir_sign", "Z_{end}^{beam} [cm]", "07_BeamChi2p_Z_dir_sign", -100., 400., 8},
-            {"Beam_chi2proton", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "07_BeamChi2p_trkLenRatio", 0., 2., 8},
-            {"Beam_chi2proton", "Beam_reco_as_trk", "Beam reco. as Track", "07_BeamChi2p_recoastrk", -1., 1., 1},
-            {"Beam_chi2proton", "Beam_calo_size", "Has collection plane cluster", "07_BeamChi2p_calosize", -1., 1., 1},
-            {"Beam_chi2proton", "Beam_chi2_proton", "#chi^{2}_{p}", "07_BeamChi2p_chi2p", 0., 400., 64},
-            {"Beam_chi2proton", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "07_BeamChi2p_deltaX", -30., 30., 16},
-            {"Beam_chi2proton", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "07_BeamChi2p_deltaY", -30., 30., 16},
-            {"Beam_chi2proton", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "07_BeamChi2p_deltaX_sigma", -5., 5., 16},
-            {"Beam_chi2proton", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "07_BeamChi2p_deltaY_sigma", -5., 5., 16},
-            {"Beam_chi2proton", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "07_BeamChi2p_KEff", 0., 600., 8},
-            {"Beam_chi2proton", "Beam_KELoss", "#DeltaE_{k} [MeV]", "07_BeamChi2p_KELoss", -60., 100., 25},
-        };
+    // ----------------------------------------------------------------
+    // Plot definitions.
+    // Fields: dir, var, xtitle, outname, xmin, xmax, nbins
+    //   xmin/xmax : display range, normalisation window, and bin edges
+    //   nbins     : number of uniform bins over [xmin, xmax]
+    //               (0 = keep original histogram binning)
+    // ----------------------------------------------------------------
+    std::vector<PlotDef> plots = {
+        // After PID cut
+        {"Beam_PID", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "01_BeamPID_Pbeam", 350., 700., 35},
+        {"Beam_PID", "Beam_endZ", "Z_{end}^{beam} [cm]", "01_BeamPID_endZ", -100., 400., 50},
+        {"Beam_PID", "Beam_Z_dir_sign", "Z dir. sign", "01_BeamPID_Z_dir_sign", -1., 1., 2},
+        {"Beam_PID", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "01_BeamPID_trkLenRatio", -1., 2., 30},
+        {"Beam_PID", "Beam_reco_as_trk", "Beam reco. as Track", "01_BeamPID_recoastrk", -1., 1., 2},
+        {"Beam_PID", "Beam_calo_size", "Has collection plane cluster", "01_Beam_PID_calosize", -1., 1., 2},
+        {"Beam_PID", "Beam_chi2_proton", "#chi^{2}_{p}", "01_BeamPID_chi2p", 0., 400., 40},
+        {"Beam_PID", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "01_BeamPID_deltaX", -30., 30., 30},
+        {"Beam_PID", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "01_BeamPID_deltaY", -30., 30., 30},
+        {"Beam_PID", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "01_BeamPID_deltaX_sigma", -5., 5., 25},
+        {"Beam_PID", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "01_BeamPID_deltaY_sigma", -5., 5., 25},
+        {"Beam_PID", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "01_BeamPID_KEff", 250., 500., 25},
+        {"Beam_PID", "Beam_KELoss", "#DeltaE_{k} [MeV]", "01_BeamPID_KELoss", -100., 100., 40},
+        // After beam scraper cut
+        {"Beam_scraper", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "02_BeamScraper_Pbeam", 350., 700., 35},
+        {"Beam_scraper", "Beam_endZ", "Z_{end}^{beam} [cm]", "02_BeamScraper_endZ", -100., 400., 50},
+        {"Beam_scraper", "Beam_Z_dir_sign", "Z dir. sign", "02_BeamScraper_Z_dir_sign", -1., 1., 2},
+        {"Beam_scraper", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "02_BeamScraper_trkLenRatio", 0., 2., 20},
+        {"Beam_scraper", "Beam_reco_as_trk", "Beam reco. as Track", "02_BeamScraper_recoastrk", -1., 1., 2},
+        {"Beam_scraper", "Beam_calo_size", "Has collection plane cluster", "02_Beam_Scraper_calosize", -1., 1., 2},
+        {"Beam_scraper", "Beam_chi2_proton", "#chi^{2}_{p}", "02_BeamScraper_chi2p", 0., 400., 40},
+        {"Beam_scraper", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "02_BeamScraper_deltaX", -30., 30., 30},
+        {"Beam_scraper", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "02_BeamScraper_deltaY", -30., 30., 30},
+        {"Beam_scraper", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "02_BeamScraper_deltaX_sigma", -5., 5., 25},
+        {"Beam_scraper", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "02_BeamScraper_deltaY_sigma", -5., 5., 25},
+        {"Beam_scraper", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "02_BeamScraper_KEff", 250., 500., 25},
+        {"Beam_scraper", "Beam_KELoss", "#DeltaE_{k} [MeV]", "02_BeamScraper_KELoss", -100., 100., 40},
+        // After collection hits cut
+        {"Beam_collhits", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "03_BeamCollhits_Pbeam", 350., 700., 35},
+        {"Beam_collhits", "Beam_endZ", "Z_{end}^{beam} [cm]", "03_BeamCollhits_endZ", -100., 400., 50},
+        {"Beam_collhits", "Beam_Z_dir_sign", "Z dir. sign", "03_BeamCollhits_Z_dir_sign", -1., 1., 2},
+        {"Beam_collhits", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "03_BeamCollhits_trkLenRatio", 0., 2., 20},
+        {"Beam_collhits", "Beam_reco_as_trk", "Beam reco. as Track", "03_BeamCollhits_recoastrk", -1., 1., 2},
+        {"Beam_collhits", "Beam_calo_size", "Has collection plane cluster", "03_BeamCollhits_calosize", -1., 1., 2},
+        {"Beam_collhits", "Beam_chi2_proton", "#chi^{2}_{p}", "03_BeamCollhits_chi2p", 0., 400., 40},
+        {"Beam_collhits", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "03_BeamCollhits_deltaX", -30., 30., 30},
+        {"Beam_collhits", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "03_BeamCollhits_deltaY", -30., 30., 30},
+        {"Beam_collhits", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "03_BeamCollhits_deltaX_sigma", -5., 5., 25},
+        {"Beam_collhits", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "03_BeamCollhits_deltaY_sigma", -5., 5., 25},
+        {"Beam_collhits", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "03_BeamCollhits_KEff", 250., 500., 25},
+        {"Beam_collhits", "Beam_KELoss", "#DeltaE_{k} [MeV]", "03_BeamCollhits_KELoss", -100., 100., 40},
+        // After reco track cut
+        {"Beam_recotrk", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "04_BeamRecotrk_Pbeam", 350., 700., 35},
+        {"Beam_recotrk", "Beam_endZ", "Z_{end}^{beam} [cm]", "04_BeamRecotrk_endZ", -100., 400., 50},
+        {"Beam_recotrk", "Beam_Z_dir_sign", "Z dir. sign", "04_BeamRecotrk_Z_dir_sign", -1., 1., 2},
+        {"Beam_recotrk", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "04_BeamRecotrk_trkLenRatio", 0., 2., 20},
+        {"Beam_recotrk", "Beam_reco_as_trk", "Beam reco. as Track", "04_BeamRecotrk_recoastrk", -1., 1., 2},
+        {"Beam_recotrk", "Beam_calo_size", "Has collection plane cluster", "04_BeamRecotrk_calosize", -1., 1., 2},
+        {"Beam_recotrk", "Beam_chi2_proton", "#chi^{2}_{p}", "04_BeamRecotrk_chi2p", 0., 400., 40},
+        {"Beam_recotrk", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "04_BeamRecotrk_deltaX", -30., 30., 30},
+        {"Beam_recotrk", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "04_BeamRecotrk_deltaY", -30., 30., 30},
+        {"Beam_recotrk", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "04_BeamRecotrk_deltaX_sigma", -5., 5., 25},
+        {"Beam_recotrk", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "04_BeamRecotrk_deltaY_sigma", -5., 5., 25},
+        {"Beam_recotrk", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "04_BeamRecotrk_KEff", 250., 500., 25},
+        {"Beam_recotrk", "Beam_KELoss", "#DeltaE_{k} [MeV]", "04_BeamRecotrk_KELoss", -100., 100., 40},
+        // After endZ cut
+        {"Beam_endZ", "Beam_KE_end", "E_{K}^{End} [MeV]", "05_BeamEndZ_KEend", 250., 500., 25},
+        {"Beam_endZ", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "05_BeamEndZ_Pbeam", 350., 700., 35},
+        {"Beam_endZ", "Beam_endZ", "Z_{end}^{beam} [cm]", "05_BeamEndZ_endZ", -100., 400., 50},
+        {"Beam_endZ", "Beam_Z_dir_sign", "Z dir. sign", "05_BeamEndZ_Z_dir_sign", -1., 1., 2},
+        {"Beam_endZ", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "05_BeamEndZ_trkLenRatio", 0., 2., 20},
+        {"Beam_endZ", "Beam_reco_as_trk", "Beam reco. as Track", "05_BeamEndZ_recoastrk", -1., 1., 2},
+        {"Beam_endZ", "Beam_calo_size", "Has collection plane cluster", "05_BeamEndZ_calosize", -1., 1., 2},
+        {"Beam_endZ", "Beam_chi2_proton", "#chi^{2}_{p}", "05_BeamEndZ_chi2p", 0., 400., 40},
+        {"Beam_endZ", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "05_BeamEndZ_deltaX", -30., 30., 30},
+        {"Beam_endZ", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "05_BeamEndZ_deltaY", -30., 30., 30},
+        {"Beam_endZ", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "05_BeamEndZ_deltaX_sigma", -5., 5., 25},
+        {"Beam_endZ", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "05_BeamEndZ_deltaY_sigma", -5., 5., 25},
+        {"Beam_endZ", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "05_BeamEndZ_KEff", 250., 500., 25},
+        {"Beam_endZ", "Beam_KELoss", "#DeltaE_{k} [MeV]", "05_BeamEndZ_KELoss", -100., 100., 40},
+        // After deltaXY cut
+        {"Beam_deltaXY", "Beam_KE_end", "E_{K}^{End} [MeV]", "06_BeamDeltaXY_KEend", 250., 500., 25},
+        {"Beam_deltaXY", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "06_BeamDeltaXY_Pbeam", 350., 700., 35},
+        {"Beam_deltaXY", "Beam_endZ", "Z_{end}^{beam} [cm]", "06_BeamDeltaXY_endZ", -100., 400., 50},
+        {"Beam_deltaXY", "Beam_Z_dir_sign", "Z dir. sign", "06_BeamDeltaXY_Z_dir_sign", -1., 1., 2},
+        {"Beam_deltaXY", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "06_BeamDeltaXY_trkLenRatio", 0., 2., 20},
+        {"Beam_deltaXY", "Beam_reco_as_trk", "Beam reco. as Track", "06_BeamDeltaXY_recoastrk", -1., 1., 2},
+        {"Beam_deltaXY", "Beam_calo_size", "Has collection plane cluster", "06_BeamDeltaXY_calosize", -1., 1., 2},
+        {"Beam_deltaXY", "Beam_chi2_proton", "#chi^{2}_{p}", "06_BeamDeltaXY_chi2p", 0., 400., 40},
+        {"Beam_deltaXY", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "06_BeamDeltaXY_deltaX", -30., 30., 30},
+        {"Beam_deltaXY", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "06_BeamDeltaXY_deltaY", -30., 30., 30},
+        {"Beam_deltaXY", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "06_BeamDeltaXY_deltaX_sigma", -5., 5., 25},
+        {"Beam_deltaXY", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "06_BeamDeltaXY_deltaY_sigma", -5., 5., 25},
+        {"Beam_deltaXY", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "06_BeamDeltaXY_KEff", 250., 500., 25},
+        {"Beam_deltaXY", "Beam_KELoss", "#DeltaE_{k} [MeV]", "06_BeamDeltaXY_KELoss", -100., 100., 40},
+        // After chi2 cut
+        {"Beam_chi2proton", "Beam_KE_end", "E_{K}^{End} [MeV]", "07_BeamChi2p_KEend", 250., 500., 25},
+        {"Beam_chi2proton", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "07_BeamChi2p_Pbeam", 350., 700., 35},
+        {"Beam_chi2proton", "Beam_endZ", "Z_{end}^{beam} [cm]", "07_BeamChi2p_endZ", -100., 400., 50},
+        {"Beam_chi2proton", "Beam_Z_dir_sign", "Z dir. sign", "07_BeamChi2p_Z_dir_sign", -1., 1., 2},
+        {"Beam_chi2proton", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "07_BeamChi2p_trkLenRatio", 0., 2., 20},
+        {"Beam_chi2proton", "Beam_reco_as_trk", "Beam reco. as Track", "07_BeamChi2p_recoastrk", -1., 1., 2},
+        {"Beam_chi2proton", "Beam_calo_size", "Has collection plane cluster", "07_BeamChi2p_calosize", -1., 1., 2},
+        {"Beam_chi2proton", "Beam_chi2_proton", "#chi^{2}_{p}", "07_BeamChi2p_chi2p", 0., 400., 40},
+        {"Beam_chi2proton", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "07_BeamChi2p_deltaX", -30., 30., 30},
+        {"Beam_chi2proton", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "07_BeamChi2p_deltaY", -30., 30., 30},
+        {"Beam_chi2proton", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "07_BeamChi2p_deltaX_sigma", -5., 5., 25},
+        {"Beam_chi2proton", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "07_BeamChi2p_deltaY_sigma", -5., 5., 25},
+        {"Beam_chi2proton", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "07_BeamChi2p_KEff", 0., 500., 50},
+        {"Beam_chi2proton", "Beam_KELoss", "#DeltaE_{k} [MeV]", "07_BeamChi2p_KELoss", -100., 100., 40},
+    };
+
+    // double globalScale = ComputeGlobalScale(fMC, fData, "Beam_scraper", "Beam_P_beam_inst", 350., 650.);
 
     for (auto& p : plots) {
-        DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname, p.xmin, p.xmax, p.rebin, "plots", fOut);
+        double scale = ComputeGlobalScale(fMC, fData, "Beam_scraper", p.var, p.xmin, p.xmax);
+        // Normalized (MC scaled to data) — original behaviour
+        DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
+                 p.xmin, p.xmax, &p, /*normalize=*/true, scale, "plots", fOut);
+        // Raw counts — no MC scaling
+        DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
+                 p.xmin, p.xmax, &p, /*normalize=*/false, 1.0, "plots", fOut);
     }
 
     PrintCutflow(fMC, plots);

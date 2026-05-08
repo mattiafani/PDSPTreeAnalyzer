@@ -37,14 +37,16 @@ void pionbeamsel::executeEvent() {
     FillHist("beam_inst_P_x2", evt.beam_inst_P * 2. * 1000., 1., 100., 0., 1000.);
 
     // -- 1. Beam instruments
+
+    // CUT: Momentum window
     if (P_beam_inst < 420. || P_beam_inst > 600.) return;
     // if(!PassBeamMomentumWindowCut()) return;
 
+    // CUT: Beam_PID
     if (!Pass_Beam_PID(211)) return;
     FillBeamPlots("Beam_PID", P_reweight);
 
-    // cout << Form("evt.beam_inst(X, Y, Z) = (%f, %f, %f), evt.beam_inst_dir(X, Y, Z) = (%f, %f, %f)", evt.beam_inst_X, evt.beam_inst_Y, evt.beam_inst_Z, evt.beam_inst_dirX, evt.beam_inst_dirY, evt.beam_inst_dirZ) << endl;
-
+    // CUT: Beam_scraper
     if (!PassBeamScraperCut()) return;
     FillHist("beam_cut_flow", 1.5, 1., 20, 0., 20.);
     FillBeamPlots("Beam_scraper", P_reweight);
@@ -52,12 +54,17 @@ void pionbeamsel::executeEvent() {
         MuonKELoss("Beam_scraper", 1.);
     }
 
+    // CUT: Beam_calo || Beam_coll_hits || Beam_calo_wire
     if (evt.reco_beam_calo_wire->empty()) return;
     Set_delta_XY_spec_TPC_at_Z((*evt.reco_beam_calo_X), (*evt.reco_beam_calo_Y), (*evt.reco_beam_calo_Z), Z_beam_end_cut);
     FillBeamPlots("Beam_collhits", P_reweight);
 
+    // CUT: Beam_reco_trk !!! Now it also includes a trk_len_ratio cut
     if (evt.reco_beam_type != pandora_slice_pdg) return;
-    FillBeamPlots("Beam_recotrk", P_reweight);
+    // FillBeamPlots("Beam_recotrk", P_reweight);
+    if (trk_len_ratio < .9) {
+        FillBeamPlots("Beam_recotrk", P_reweight);
+    }
 
     // double true_ff_X, true_ff_Y, true_ff_Z;
     // if(!IsData) get_true_XYZ_at_FF(true_ff_X, true_ff_Y, true_ff_Z);
@@ -71,17 +78,21 @@ void pionbeamsel::executeEvent() {
     // if(!Pass_BeamStartZ(2.)) return;
     // FillBeamPlots("Beam_startZ", P_reweight);
 
+    // CUT: Beam_endZ ???
     if (evt.reco_beam_calo_endZ < Z_beam_end_cut) return;
     double rr_at_z_cut = GetBeamRRatZ((*evt.reco_beam_resRange_SCE), (*evt.reco_beam_calo_Z), Z_beam_end_cut);
     KE_end_reco = map_BB[211]->KEAtLength(KE_ff_reco, rr_at_z_cut);
     E_end_reco = KE_end_reco + mass_beam;
     FillBeamPlots("Beam_endZ", P_reweight);
 
+    // CUT: Beam_deltaXY
     if (!Pass_beam_delta_X_cut(2.)) return;
     if (!Pass_beam_delta_Y_cut(2.)) return;
     FillBeamPlots("Beam_deltaXY", P_reweight);
 
-    if (chi2_proton > 300. || chi2_proton < 140.) return;
+    // CUT: Beam_chi2proton
+    if (chi2_proton > 280. || chi2_proton < 160.) return;
+    // if (chi2_proton > 300. || chi2_proton < 140.) return;
     FillBeamPlots("Beam_chi2proton", P_reweight);
 }
 
