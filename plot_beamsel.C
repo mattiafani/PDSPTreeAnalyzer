@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "TCanvas.h"
+#include "TF1.h"
 #include "TFile.h"
 #include "TH1D.h"
 #include "THStack.h"
@@ -36,11 +37,15 @@ const int catColor[NCAT + 1] = {
     kRed + 1, kYellow + 1, kCyan + 1, kBlue + 2, kGreen + 2, kMagenta + 1,
     kCyan - 6, kGray + 1, kOrange + 1, kRed - 7, kBlue - 7, kGreen - 6, kGray + 2};
 
+// ============================================================
+// Number of sigma around the mean used to define the Gaussian
+// fit range. Increase or decrease as needed.
+// ============================================================
+const double kFitRangeSigma = 6.0;
+
 struct PlotDef {
     TString dir, var, xtitle, outname;
     double xmin, xmax;
-    // nbins: number of uniform bins over [xmin, xmax].
-    // Set to 0 to keep the original histogram binning.
     int nbins;
 };
 
@@ -75,8 +80,6 @@ TH1D* GetHistMC(TFile* f, TString dir, TString prefix, int cat) {
 
 // ============================================================
 // Apply binning from a PlotDef to a histogram.
-// If nbins > 0: rehistogram into nbins uniform bins over [xmin, xmax].
-// If nbins == 0: return the histogram unchanged.
 // ============================================================
 TH1D* ApplyBinning(TH1D* h, const PlotDef& p, const char* newname) {
     if (p.nbins > 0 && p.xmax > p.xmin) {
@@ -101,46 +104,80 @@ TH1D* ApplyBinning(TH1D* h, const PlotDef& p, const char* newname) {
         delete h;
         return hNew;
     }
-    return h;  // nbins == 0: keep original binning
+    return h;
 }
 
-///////////////
+// ============================================================
+// Fit a single Gaussian to a histogram within kFitRangeSigma
+// sigma of the histogram mean.  Draws the result on the current
+// pad and returns the TF1 (owned by ROOT — do not delete).
+//
+// color    : line color for the fit curve
+// fname    : unique name for the TF1 (must differ per call)
+// Returns nullptr if the fit fails.
+// ============================================================
+TF1* FitAndDrawGaussian(TH1D* h, int color, const char* fname,
+                        double xmin, double xmax) {
+    // First-pass estimates from histogram moments restricted to
+    // the display range.
+    h->GetXaxis()->SetRangeUser(xmin, xmax);
+    double mean0 = h->GetMean();
+    double sigma0 = h->GetRMS();
+    h->GetXaxis()->UnZoom();
+
+    if (sigma0 <= 0.) {
+        printf("FitAndDrawGaussian WARNING: sigma0=0 for %s, skipping fit\n", fname);
+        return nullptr;
+    }
+
+    double fitLo = mean0 - kFitRangeSigma * sigma0;
+    double fitHi = mean0 + kFitRangeSigma * sigma0;
+    // Clamp to display range
+    fitLo = std::max(fitLo, xmin);
+    fitHi = std::min(fitHi, xmax);
+
+    TF1* f = new TF1(fname, "gaus", fitLo, fitHi);
+    f->SetParameters(h->GetMaximum(), mean0, sigma0);
+    f->SetLineColor(color);
+    f->SetLineWidth(2);
+    f->SetLineStyle(2);  // dashed, matching colleague's style
+
+    // "Q" = quiet, "0" = do not draw automatically (we call Draw("SAME") below),
+    // "R" = use range stored in TF1, "S" = return TFitResult
+    TFitResultPtr r = h->Fit(f, "Q0R");
+    if ((int)r != 0) {
+        printf("FitAndDrawGaussian WARNING: fit did not converge for %s\n", fname);
+        // Draw anyway with whatever ROOT found
+    }
+
+    // Draw over the full display range so the tail is visible
+    f->SetRange(xmin, xmax);
+    f->Draw("SAME");
+
+    return f;
+}
 
 // ============================================================
-// Compute a single MC->data scale factor from a chosen base
-// selection stage and variable.
-//
-// dir : ROOT directory in the histogram file, e.g. "Beam_scraper"
-// var : branch name fragment, e.g. "Beam_P_beam_inst"
-//
-// Opens dir/dir_var_1 ... dir_var_13 (MC categories), sums them
-// into a total MC histogram, then returns:
-//
-//   scale = hData->Integral() / hMCTotal->Integral()
-//
-// over the full histogram range.  Returns 1.0 with a warning if
-// the histograms are not found or the MC integral is zero.
+// Compute a single MC->data scale factor.
 // ============================================================
 double ComputeGlobalScale(TFile* fMC, TFile* fData,
-                          TString dir, TString var, double xmin = -1., double xmax = -1.) {
+                          TString dir, TString var,
+                          double xmin = -1., double xmax = -1.) {
     TString prefix = dir + "_" + var;
 
-    // --- data
     TDirectory* dData = (TDirectory*)fData->Get(dir);
     if (!dData) {
-        printf("ComputeGlobalScale WARNING: directory '%s' not found in data file\n",
-               dir.Data());
+        printf("ComputeGlobalScale WARNING: directory '%s' not found in data file\n", dir.Data());
         return 1.0;
     }
     TH1D* hData = (TH1D*)dData->Get(prefix);
     if (!hData) hData = (TH1D*)dData->Get(prefix + "_0");
     if (!hData) {
-        printf("ComputeGlobalScale WARNING: histogram '%s' not found in data file\n",
-               prefix.Data());
+        printf("ComputeGlobalScale WARNING: histogram '%s' not found in data file\n", prefix.Data());
         return 1.0;
     }
     hData->SetDirectory(0);
-    // double dataIntegral = hData->Integral();
+
     double dataIntegral, mcIntegral = 0.;
     if (xmax > xmin) {
         int b1 = hData->FindBin(xmin);
@@ -151,21 +188,11 @@ double ComputeGlobalScale(TFile* fMC, TFile* fData,
     }
     delete hData;
 
-    // --- MC: sum all 13 categories
     TDirectory* dMC = (TDirectory*)fMC->Get(dir);
     if (!dMC) {
-        printf("ComputeGlobalScale WARNING: directory '%s' not found in MC file\n",
-               dir.Data());
+        printf("ComputeGlobalScale WARNING: directory '%s' not found in MC file\n", dir.Data());
         return 1.0;
     }
-    // double mcIntegral = 0.;
-    // for (int i = 1; i <= 13; i++) {
-    //     TH1D* h = (TH1D*)dMC->Get(prefix + Form("_%d", i));
-    //     if (!h) continue;
-    //     h->SetDirectory(0);
-    //     mcIntegral += h->Integral();
-    //     delete h;
-    // }
     for (int i = 1; i <= 13; i++) {
         TH1D* h = (TH1D*)dMC->Get(prefix + Form("_%d", i));
         if (!h) continue;
@@ -180,8 +207,7 @@ double ComputeGlobalScale(TFile* fMC, TFile* fData,
         delete h;
     }
     if (mcIntegral <= 0.) {
-        printf("ComputeGlobalScale WARNING: MC integral is zero for '%s/%s'\n",
-               dir.Data(), var.Data());
+        printf("ComputeGlobalScale WARNING: MC integral is zero for '%s/%s'\n", dir.Data(), var.Data());
         return 1.0;
     }
 
@@ -191,13 +217,8 @@ double ComputeGlobalScale(TFile* fMC, TFile* fData,
     return scale;
 }
 
-///////////////
-
 // ============================================================
 // Main plotting function
-// normalize: true  = scale MC to data (original behaviour)
-//            false = raw counts, no scaling
-// xmin, xmax: set to -1 to use histogram defaults
 // ============================================================
 void DrawPlot(TFile* fMC, TFile* fData,
               TString dir, TString varname,
@@ -218,7 +239,6 @@ void DrawPlot(TFile* fMC, TFile* fData,
         {"Beam_chi2proton", "140 < #chi^{2}_{p} < 300"},
     };
 
-    // Find index of current stage
     int currentStageIdx = -1;
     for (int i = 0; i < (int)allCuts.size(); i++) {
         if (allCuts[i].first == dir) {
@@ -229,15 +249,15 @@ void DrawPlot(TFile* fMC, TFile* fData,
 
     TString prefix = dir + "_" + varname;
 
-    if (DEBUG) {
-        std::string msg = std::string(":::: Processing ") + dir.Data() + " / " + varname.Data() + " ";
-        if ((int)msg.size() < 119)
-            msg.append(119 - msg.size(), ':');
-        printf("%s\n", msg.c_str());
-    }
-
+    if (DEBUG)
+        printf(":::: Processing %s / %s\n", dir.Data(), varname.Data());
     else
         printf(":::: Processing %s/%s\n", dir.Data(), varname.Data());
+
+    // Decide whether to overlay Gaussian fits for this variable.
+    // Applied to the raw ΔX / ΔY distributions (not the /sigma variants).
+    bool doGausFit = (varname == "Beam_delta_X_spec_TPC" ||
+                      varname == "Beam_delta_Y_spec_TPC");
 
     // -- Get Data histogram
     TH1D* hData = GetHistData(fData, dir, prefix);
@@ -276,7 +296,6 @@ void DrawPlot(TFile* fMC, TFile* fData,
         return;
     }
 
-    // -- Apply binning to Data
     if (pdef) hData = ApplyBinning(hData, *pdef, "hData_binned");
 
     // -- Normalize MC to Data (or keep raw counts)
@@ -291,19 +310,10 @@ void DrawPlot(TFile* fMC, TFile* fData,
         mcIntegral = hMC_total->Integral();
     }
 
-    // if (normalize) {
-    //     scale = (mcIntegral > 0) ? dataIntegral / mcIntegral : 1.;
-    //     if (mcIntegral != dataIntegral)
-    //         printf(" !!! WARNING !!! Integrals don't match for %s/%s — Data: %.2f, MC: %.2f\n",
-    //                dir.Data(), varname.Data(), dataIntegral, mcIntegral);
-    // } else {
-    //     scale = 1.;  // raw counts — no scaling applied
-    // }
-
     if (!normalize) {
         scale = 1.;
     } else if (fixedScale > 0.) {
-        scale = fixedScale;  // global scale from ComputeGlobalScale()
+        scale = fixedScale;
     } else {
         scale = (mcIntegral > 0) ? dataIntegral / mcIntegral : 1.;
         printf(" !!! WARNING !!! No fixed scale provided — falling back to per-plot normalisation for %s/%s\n",
@@ -314,9 +324,15 @@ void DrawPlot(TFile* fMC, TFile* fData,
     hMC_total->Scale(scale);
     double mcSumScaled = hMC_total->Integral();
 
-    // -- Set axis range
+    // -- Axis range
     double axMin = (xmin >= 0) ? xmin : hData->GetXaxis()->GetXmin();
     double axMax = (xmax > 0) ? xmax : hData->GetXaxis()->GetXmax();
+    // For signed variables the default xmin check fails; use explicit range
+    // when both bounds are provided.
+    if (xmin < 0 && xmax > 0) {
+        axMin = xmin;
+        axMax = xmax;
+    }
 
     // -- Style data
     hData->SetMarkerStyle(20);
@@ -347,19 +363,35 @@ void DrawPlot(TFile* fMC, TFile* fData,
     stack->GetYaxis()->SetTitleOffset(1.0);
     stack->GetYaxis()->SetLabelSize(0.05);
 
-    //
     hData->GetXaxis()->SetRangeUser(axMin, axMax);
     hMC_total->GetXaxis()->SetRangeUser(axMin, axMax);
     double ymax = std::max(hData->GetMaximum(), hMC_total->GetMaximum());
     hData->GetXaxis()->UnZoom();
     hMC_total->GetXaxis()->UnZoom();
 
-    //
     stack->SetMaximum(ymax * 2.2);
     stack->SetMinimum(0.);
 
-    if (varname == "Beam_delta_X_spec_TPC") hData->GetXaxis()->SetRangeUser(-30, 30);
+    if (varname == "Beam_delta_X_spec_TPC")
+        hData->GetXaxis()->SetRangeUser(-30, 30);
     hData->Draw("E1 SAME");
+
+    // -- Gaussian fits (drawn on top of data points)
+    TF1* fMCfit = nullptr;
+    TF1* fDatafit = nullptr;
+    if (doGausFit) {
+        // Clone histograms for fitting so we don't disturb the display objects.
+        TH1D* hMC_forFit = (TH1D*)hMC_total->Clone("hMC_forFit");
+        TH1D* hData_forFit = (TH1D*)hData->Clone("hData_forFit");
+        hMC_forFit->SetDirectory(0);
+        hData_forFit->SetDirectory(0);
+
+        fMCfit = FitAndDrawGaussian(hMC_forFit, kAzure + 2, Form("fMC_%s_%s", dir.Data(), varname.Data()), axMin, axMax);
+        fDatafit = FitAndDrawGaussian(hData_forFit, kMagenta, Form("fData_%s_%s", dir.Data(), varname.Data()), axMin, axMax);
+
+        delete hMC_forFit;
+        delete hData_forFit;
+    }
 
     // -- Legend, 4 columns
     TLegend* leg = new TLegend(0.12, 0.6, 0.92, 0.88);
@@ -369,7 +401,6 @@ void DrawPlot(TFile* fMC, TFile* fData,
     leg->SetTextSize(0.025);
     leg->SetMargin(0.12);
 
-    // Add MC categories in stack order
     for (int i = 0; i < (int)hMC_cat.size(); i++) {
         int cat = hMC_cat[i].first;
         TH1D* h = hMC_cat[i].second;
@@ -380,7 +411,6 @@ void DrawPlot(TFile* fMC, TFile* fData,
         else
             leg->AddEntry(h, Form("#bf{%s %.0f, (%.1f %%)}", catName[cat], integ, pct), "f");
     }
-    // MC Sum and Observed
     if (normalize) {
         leg->AddEntry((TObject*)nullptr, Form("MC Sum %.1f", mcSumScaled), "");
         leg->AddEntry(hData, Form("Observed %.0f", dataIntegral), "lep");
@@ -388,7 +418,29 @@ void DrawPlot(TFile* fMC, TFile* fData,
         leg->AddEntry((TObject*)nullptr, Form("MC Raw %.0f", mcSumScaled), "");
         leg->AddEntry(hData, Form("Data %.0f", dataIntegral), "lep");
     }
+
     leg->Draw();
+
+    // Separate small legend on the left for the two Gaussian fit lines
+    if (doGausFit && (fMCfit || fDatafit)) {
+        TLegend* legFit = new TLegend(0.6, 0.42, 0.95, 0.52);
+        legFit->SetBorderSize(0);
+        legFit->SetFillStyle(0);
+        legFit->SetTextSize(0.025);
+        if (fMCfit) {
+            legFit->AddEntry(fMCfit,
+                             Form("#bf{MC fit:} #mu = %.3f, #sigma = %.3f",
+                                  fMCfit->GetParameter(1), fMCfit->GetParameter(2)),
+                             "l");
+        }
+        if (fDatafit) {
+            legFit->AddEntry(fDatafit,
+                             Form("#bf{Data fit:} #mu = %.3f, #sigma = %.3f",
+                                  fDatafit->GetParameter(1), fDatafit->GetParameter(2)),
+                             "l");
+        }
+        legFit->Draw();
+    }
 
     // -- Labels
     TLatex lat;
@@ -424,31 +476,23 @@ void DrawPlot(TFile* fMC, TFile* fData,
     pad2->cd();
     pad2->SetTicks(1, 1);
 
-    // Build ratio
     TH1D* hRatio = (TH1D*)hData->Clone("hRatio");
     hRatio->SetDirectory(0);
     hRatio->Reset();
 
-    //
     TH1D* hMC_forRatio = (TH1D*)hMC_total->Clone("hMC_forRatio");
     hMC_forRatio->SetDirectory(0);
 
-    // If binning differs, rebin to match
     if (hData->GetNbinsX() != hMC_forRatio->GetNbinsX()) {
         double factor = hData->GetNbinsX() / hMC_forRatio->GetNbinsX();
-        if (factor > 1) {
-            hMC_forRatio->Rebin(factor);  // shouldn't happen
-            if (DEBUG) printf(" !!! WARNING !!! Rebinning MC histogram by factor %f\n", factor);
-        }
+        if (factor > 1) hMC_forRatio->Rebin(factor);
     }
 
-    // Fill ratio bin by bin preserving data statistical errors
     for (int b = 1; b <= hRatio->GetNbinsX(); b++) {
         double nData = hData->GetBinContent(b);
         double nMC = hMC_total->GetBinContent(b);
         if (nMC > 0) {
             hRatio->SetBinContent(b, nData / nMC);
-            // Error = sqrt(N_data) / N_MC  (Poisson error on data)
             hRatio->SetBinError(b, TMath::Sqrt(nData) / nMC);
         } else {
             hRatio->SetBinContent(b, 0.);
@@ -480,16 +524,13 @@ void DrawPlot(TFile* fMC, TFile* fData,
 
     if (fOut) {
         fOut->cd();
-        // Save canvas in a subdirectory named after the mode
         TString modedir = normalize ? "normalized" : "raw";
-        if (!fOut->GetDirectory(modedir))
-            fOut->mkdir(modedir);
+        if (!fOut->GetDirectory(modedir)) fOut->mkdir(modedir);
         fOut->cd(modedir);
         c->Write(outname);
         fOut->cd();
     }
 
-    // -- Save PDF — append _raw suffix for raw-count version
     TString pdfName = normalize ? outname : outname + "_raw";
     gSystem->mkdir(plotdir, kTRUE);
     c->SaveAs(Form("%s/%s.pdf", plotdir.Data(), pdfName.Data()));
@@ -515,7 +556,6 @@ void PrintCutflow(TFile* fMC, const vector<PlotDef>& plots) {
             currentDir = p.dir;
             printf("\n--- %s ---\n", currentDir.Data());
         }
-
         TString prefix = p.dir + "_" + p.var;
         double total = 0.;
         TString missing = "";
@@ -540,7 +580,7 @@ void plot_beamsel() {
     gStyle->SetOptTitle(0);
 
     TFile* fMC = TFile::Open("hists_MC_0.5GeV_pionbeamsel.root");
-    TFile* fData = TFile::Open("hists_data_0.5GeV_pionbeamsel.root");
+    TFile* fData = TFile::Open("hists_Data_0.5GeV_pionbeamsel.root");
 
     if (!fMC || fMC->IsZombie()) {
         printf("ERROR: cannot open MC file\n");
@@ -557,13 +597,6 @@ void plot_beamsel() {
         return;
     }
 
-    // ----------------------------------------------------------------
-    // Plot definitions.
-    // Fields: dir, var, xtitle, outname, xmin, xmax, nbins
-    //   xmin/xmax : display range, normalisation window, and bin edges
-    //   nbins     : number of uniform bins over [xmin, xmax]
-    //               (0 = keep original histogram binning)
-    // ----------------------------------------------------------------
     std::vector<PlotDef> plots = {
         // After PID cut
         {"Beam_PID", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "01_BeamPID_Pbeam", 350., 700., 35},
@@ -668,14 +701,12 @@ void plot_beamsel() {
         {"Beam_chi2proton", "Beam_KELoss", "#DeltaE_{k} [MeV]", "07_BeamChi2p_KELoss", -100., 100., 40},
     };
 
-    // double globalScale = ComputeGlobalScale(fMC, fData, "Beam_scraper", "Beam_P_beam_inst", 350., 650.);
-
     for (auto& p : plots) {
         double scale = ComputeGlobalScale(fMC, fData, "Beam_scraper", p.var, p.xmin, p.xmax);
-        // Normalized (MC scaled to data) — original behaviour
+        // Normalized (MC scaled to data)
         DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
                  p.xmin, p.xmax, &p, /*normalize=*/true, scale, "plots", fOut);
-        // Raw counts — no MC scaling
+        // Raw counts
         DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
                  p.xmin, p.xmax, &p, /*normalize=*/false, 1.0, "plots", fOut);
     }

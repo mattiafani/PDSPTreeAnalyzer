@@ -12,3 +12,11 @@ run_pionbeamsel_BKP20260306.C
 'mf[PDSPTreeAnalyzer][git:PDSPTreeAnalyzer:sungbino_new_0p5gev_mc]:'
 hists_*.root
 tar/
+plots/*
+*bkp*
+*BKP*
+*OLD*
+*old*
+root_files_w_default_cuts_20260508*
+run_pionbeamsel_found_20260508.C
+*.root
