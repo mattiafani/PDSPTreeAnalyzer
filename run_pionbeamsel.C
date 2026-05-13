@@ -4,8 +4,8 @@
 
 void run_pionbeamsel() {
     // ─── USER CONFIGURATION ──────────────────────────────────────────
-    // const TString runMode = "MC";  // "MC"
-    const TString runMode = "Data";   // "Data"
+    const TString runMode = "MC";  // "MC"
+    // const TString runMode = "Data";   // "Data"
     const double beamMomentum = 0.5;  // GeV/c: 0.5, 1.0, or 2.0
     const int maxEvents = -1;         // -1 = all
     // ─────────────────────────────────────────────────────────────────

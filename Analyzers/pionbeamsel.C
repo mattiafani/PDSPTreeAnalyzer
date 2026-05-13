@@ -59,9 +59,10 @@ void pionbeamsel::executeEvent() {
     Set_delta_XY_spec_TPC_at_Z((*evt.reco_beam_calo_X), (*evt.reco_beam_calo_Y), (*evt.reco_beam_calo_Z), Z_beam_end_cut);
     FillBeamPlots("Beam_collhits", P_reweight);
 
-    // CUT: Beam_reco_trk (modified 20260508: now it also includes a trk_len_ratio cut)
+    // CUT: Beam_reco_trk
     if (evt.reco_beam_type != pandora_slice_pdg) return;
-    if (trk_len_ratio >= 0.9) return;
+    // Uncomment this line to also includes a trk_len_ratio cut -> TODO: make this a real cut, properly integrated in the code
+    // if (trk_len_ratio >= 0.9) return;
     FillBeamPlots("Beam_recotrk", P_reweight);
 
     // double true_ff_X, true_ff_Y, true_ff_Z;
@@ -89,8 +90,8 @@ void pionbeamsel::executeEvent() {
     FillBeamPlots("Beam_deltaXY", P_reweight);
 
     // CUT: Beam_chi2proton (modified 20260508)
-    if (chi2_proton > 280. || chi2_proton < 160.) return;
-    // if (chi2_proton > 300. || chi2_proton < 140.) return;
+    // if (chi2_proton > 280. || chi2_proton < 160.) return;
+    if (chi2_proton > 300. || chi2_proton < 140.) return;
     FillBeamPlots("Beam_chi2proton", P_reweight);
 }
 
