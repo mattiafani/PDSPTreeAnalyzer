@@ -602,7 +602,7 @@ void plot_beamsel() {
         {"Beam_PID", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "01_BeamPID_Pbeam", 350., 700., 35},
         {"Beam_PID", "Beam_endZ", "Z_{end}^{beam} [cm]", "01_BeamPID_endZ", -100., 400., 50},
         {"Beam_PID", "Beam_Z_dir_sign", "Z dir. sign", "01_BeamPID_Z_dir_sign", -1., 1., 2},
-        {"Beam_PID", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "01_BeamPID_trkLenRatio", -1., 2., 30},
+        {"Beam_PID", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "01_BeamPID_trkLenRatio", 0., 2., 20},
         {"Beam_PID", "Beam_reco_as_trk", "Beam reco. as Track", "01_BeamPID_recoastrk", -1., 1., 2},
         {"Beam_PID", "Beam_calo_size", "Has collection plane cluster", "01_Beam_PID_calosize", -1., 1., 2},
         {"Beam_PID", "Beam_chi2_proton", "#chi^{2}_{p}", "01_BeamPID_chi2p", 0., 400., 40},
@@ -618,7 +618,7 @@ void plot_beamsel() {
         {"Beam_scraper", "Beam_Z_dir_sign", "Z dir. sign", "02_BeamScraper_Z_dir_sign", -1., 1., 2},
         {"Beam_scraper", "Beam_trk_len_ratio", "L_{Beam track}/L_{Exp.}", "02_BeamScraper_trkLenRatio", 0., 2., 20},
         {"Beam_scraper", "Beam_reco_as_trk", "Beam reco. as Track", "02_BeamScraper_recoastrk", -1., 1., 2},
-        {"Beam_scraper", "Beam_calo_size", "Has collection plane cluster", "02_Beam_Scraper_calosize", -1., 1., 2},
+        {"Beam_scraper", "Beam_calo_size", "Has collection plane cluster", "02_BeamScraper_calosize", -1., 1., 2},
         {"Beam_scraper", "Beam_chi2_proton", "#chi^{2}_{p}", "02_BeamScraper_chi2p", 0., 400., 40},
         {"Beam_scraper", "Beam_delta_X_spec_TPC", "#DeltaX(spec., z=10cm) [cm]", "02_BeamScraper_deltaX", -30., 30., 30},
         {"Beam_scraper", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "02_BeamScraper_deltaY", -30., 30., 30},
@@ -655,7 +655,7 @@ void plot_beamsel() {
         {"Beam_recotrk", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "04_BeamRecotrk_KEff", 250., 500., 25},
         {"Beam_recotrk", "Beam_KELoss", "#DeltaE_{k} [MeV]", "04_BeamRecotrk_KELoss", -100., 100., 40},
         // After endZ cut
-        {"Beam_endZ", "Beam_KE_end", "E_{K}^{End} [MeV]", "05_BeamEndZ_KEend", 250., 500., 25},
+        {"Beam_endZ", "Beam_KE_end", "E_{K}^{End} [MeV]", "05_BeamEndZ_KEend", 0., 500., 50},
         {"Beam_endZ", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "05_BeamEndZ_Pbeam", 350., 700., 35},
         {"Beam_endZ", "Beam_endZ", "Z_{end}^{beam} [cm]", "05_BeamEndZ_endZ", -100., 400., 50},
         {"Beam_endZ", "Beam_Z_dir_sign", "Z dir. sign", "05_BeamEndZ_Z_dir_sign", -1., 1., 2},
@@ -670,7 +670,7 @@ void plot_beamsel() {
         {"Beam_endZ", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "05_BeamEndZ_KEff", 250., 500., 25},
         {"Beam_endZ", "Beam_KELoss", "#DeltaE_{k} [MeV]", "05_BeamEndZ_KELoss", -100., 100., 40},
         // After deltaXY cut
-        {"Beam_deltaXY", "Beam_KE_end", "E_{K}^{End} [MeV]", "06_BeamDeltaXY_KEend", 250., 500., 25},
+        {"Beam_deltaXY", "Beam_KE_end", "E_{K}^{End} [MeV]", "06_BeamDeltaXY_KEend", 0., 500., 50},
         {"Beam_deltaXY", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "06_BeamDeltaXY_Pbeam", 350., 700., 35},
         {"Beam_deltaXY", "Beam_endZ", "Z_{end}^{beam} [cm]", "06_BeamDeltaXY_endZ", -100., 400., 50},
         {"Beam_deltaXY", "Beam_Z_dir_sign", "Z dir. sign", "06_BeamDeltaXY_Z_dir_sign", -1., 1., 2},
@@ -685,7 +685,7 @@ void plot_beamsel() {
         {"Beam_deltaXY", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "06_BeamDeltaXY_KEff", 250., 500., 25},
         {"Beam_deltaXY", "Beam_KELoss", "#DeltaE_{k} [MeV]", "06_BeamDeltaXY_KELoss", -100., 100., 40},
         // After chi2 cut
-        {"Beam_chi2proton", "Beam_KE_end", "E_{K}^{End} [MeV]", "07_BeamChi2p_KEend", 250., 500., 25},
+        {"Beam_chi2proton", "Beam_KE_end", "E_{K}^{End} [MeV]", "07_BeamChi2p_KEend", 0., 500., 50},
         {"Beam_chi2proton", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", "07_BeamChi2p_Pbeam", 350., 700., 35},
         {"Beam_chi2proton", "Beam_endZ", "Z_{end}^{beam} [cm]", "07_BeamChi2p_endZ", -100., 400., 50},
         {"Beam_chi2proton", "Beam_Z_dir_sign", "Z dir. sign", "07_BeamChi2p_Z_dir_sign", -1., 1., 2},
@@ -697,18 +697,26 @@ void plot_beamsel() {
         {"Beam_chi2proton", "Beam_delta_Y_spec_TPC", "#DeltaY(spec., z=10cm) [cm]", "07_BeamChi2p_deltaY", -30., 30., 30},
         {"Beam_chi2proton", "Beam_delta_X_spec_TPC_over_sigma", "#DeltaX/#sigma", "07_BeamChi2p_deltaX_sigma", -5., 5., 25},
         {"Beam_chi2proton", "Beam_delta_Y_spec_TPC_over_sigma", "#DeltaY/#sigma", "07_BeamChi2p_deltaY_sigma", -5., 5., 25},
-        {"Beam_chi2proton", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "07_BeamChi2p_KEff", 0., 500., 50},
+        {"Beam_chi2proton", "Beam_KE_ff", "E_{K}(Z=10cm) [MeV]", "07_BeamChi2p_KEff", 250., 500., 25},
         {"Beam_chi2proton", "Beam_KELoss", "#DeltaE_{k} [MeV]", "07_BeamChi2p_KELoss", -100., 100., 40},
     };
 
     for (auto& p : plots) {
-        double scale = ComputeGlobalScale(fMC, fData, "Beam_scraper", p.var, p.xmin, p.xmax);
+        // double scale = ComputeGlobalScale(fMC, fData, "Beam_scraper", p.var, p.xmin, p.xmax);
+        // // Normalized (MC scaled to data)
+        // DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
+        //          p.xmin, p.xmax, &p, /*normalize=*/true, scale, "plots", fOut);
+        // // Raw counts
+        // DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
+        //          p.xmin, p.xmax, &p, /*normalize=*/false, 1.0, "plots", fOut);
+
+        double scale = ComputeGlobalScale(fMC, fData, "Beam_scraper", p.var, -1, -1);
         // Normalized (MC scaled to data)
         DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
-                 p.xmin, p.xmax, &p, /*normalize=*/true, scale, "plots", fOut);
+                 -1, -1, &p, /*normalize=*/true, scale, "plots", fOut);
         // Raw counts
         DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
-                 p.xmin, p.xmax, &p, /*normalize=*/false, 1.0, "plots", fOut);
+                 -1, -1, &p, /*normalize=*/false, 1.0, "plots", fOut);
     }
 
     PrintCutflow(fMC, plots);

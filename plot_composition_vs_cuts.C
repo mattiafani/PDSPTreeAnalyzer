@@ -5,10 +5,6 @@
 // at each cut stage and shows how the category composition (%)
 // evolves through the cuts.
 //
-// MC is shown as raw (unscaled) counts.
-// Data is shown as raw counts with no error bars.
-// Data/MC discrepancies at any stage are therefore directly visible.
-//
 // Usage:  root -l -b -q plot_composition_vs_cuts.C
 // ============================================================
 

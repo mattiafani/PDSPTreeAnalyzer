@@ -24,13 +24,13 @@ void pionbeamsel::executeEvent() {
     KE_end_reco = -999.;
     E_end_reco = KE_end_reco + mass_beam;
 
-    if (P_beam_inst > 522. && P_beam_inst < 523. && pi_type == 1) {
-        cout << Form("P 522 MeV/c!!! (run,subrun,evt) = (%d, %d, %d), true_beam_P(X,Y,Z) = (%f, %f, %f)", evt.run, evt.subrun, evt.event, evt.true_beam_startPx * 1000., evt.true_beam_startPy * 1000., evt.true_beam_startPz * 1000.) << endl;
-    }
+    // if (P_beam_inst > 522. && P_beam_inst < 523. && pi_type == 1) {
+    //     cout << Form("P 522 MeV/c!!! (run,subrun,evt) = (%d, %d, %d), true_beam_P(X,Y,Z) = (%f, %f, %f)", evt.run, evt.subrun, evt.event, evt.true_beam_startPx * 1000., evt.true_beam_startPy * 1000., evt.true_beam_startPz * 1000.) << endl;
+    // }
 
-    if (P_beam_inst > 483. && P_beam_inst < 484. && pi_type == 3) {
-        cout << Form("P 483 MeV/c!!! (run,subrun,evt) = (%d, %d, %d), true_beam_P(X,Y,Z) = (%f, %f, %f)", evt.run, evt.subrun, evt.event, evt.true_beam_startPx * 1000., evt.true_beam_startPy * 1000., evt.true_beam_startPz * 1000.) << endl;
-    }
+    // if (P_beam_inst > 483. && P_beam_inst < 484. && pi_type == 3) {
+    //     cout << Form("P 483 MeV/c!!! (run,subrun,evt) = (%d, %d, %d), true_beam_P(X,Y,Z) = (%f, %f, %f)", evt.run, evt.subrun, evt.event, evt.true_beam_startPx * 1000., evt.true_beam_startPy * 1000., evt.true_beam_startPz * 1000.) << endl;
+    // }
 
     double P_reweight = 1.;
     if (!IsData) P_reweight = MCCorr->MomentumReweight_SF("Pion_PID_P_0p5", P_beam_inst, 0.);
