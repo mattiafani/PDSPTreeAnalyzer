@@ -542,36 +542,6 @@ void DrawPlot(TFile* fMC, TFile* fData,
     delete stack;
 }
 
-void PrintCutflow(TFile* fMC, const vector<PlotDef>& plots) {
-    const int NCAT = 13;
-    const char* catName[NCAT + 1] = {
-        "Data",
-        "PiElas", "PiRes", "PiQE", "PiDCEX", "PiABS", "PiCEX",
-        "Muon", "misID:cosmic", "misID:p", "misID:pi", "misID:mu",
-        "misID:e/gamma", "misID:other"};
-
-    TString currentDir = "";
-    for (auto& p : plots) {
-        if (p.dir != currentDir) {
-            currentDir = p.dir;
-            printf("\n--- %s ---\n", currentDir.Data());
-        }
-        TString prefix = p.dir + "_" + p.var;
-        double total = 0.;
-        TString missing = "";
-        for (int i = 1; i <= NCAT; i++) {
-            TH1D* h = (TH1D*)fMC->Get(p.dir + "/" + prefix + Form("_%d", i));
-            if (h)
-                total += h->Integral();
-            else
-                missing += Form("%d(%s) ", i, catName[i]);
-        }
-        printf("  %-40s  total=%8.1f", p.var.Data(), total);
-        if (missing.Length()) printf("  MISSING: %s", missing.Data());
-        printf("\n");
-    }
-}
-
 // ============================================================
 // Main
 // ============================================================
@@ -702,24 +672,14 @@ void plot_beamsel() {
     };
 
     for (auto& p : plots) {
-        // double scale = ComputeGlobalScale(fMC, fData, "Beam_scraper", p.var, p.xmin, p.xmax);
-        // // Normalized (MC scaled to data)
-        // DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
-        //          p.xmin, p.xmax, &p, /*normalize=*/true, scale, "plots", fOut);
-        // // Raw counts
-        // DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
-        //          p.xmin, p.xmax, &p, /*normalize=*/false, 1.0, "plots", fOut);
-
-        double scale = ComputeGlobalScale(fMC, fData, "Beam_scraper", p.var, -1, -1);
+        double scale = ComputeGlobalScale(fMC, fData, "Beam_scraper", p.var, p.xmin, p.xmax);
         // Normalized (MC scaled to data)
         DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
-                 -1, -1, &p, /*normalize=*/true, scale, "plots", fOut);
+                 p.xmin, p.xmax, &p, /*normalize=*/true, scale, "plots", fOut);
         // Raw counts
         DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
-                 -1, -1, &p, /*normalize=*/false, 1.0, "plots", fOut);
+                 p.xmin, p.xmax, &p, /*normalize=*/false, 1.0, "plots", fOut);
     }
-
-    PrintCutflow(fMC, plots);
 
     fMC->Close();
     fData->Close();
