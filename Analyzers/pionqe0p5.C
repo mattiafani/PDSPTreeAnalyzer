@@ -75,40 +75,9 @@ void pionqe0p5::executeEvent() {
     // == Study secondary particle multiplicities
     FillRecoPionPlots("loose_charged_pion", loose_charged_pions, P_reweight);
 
-    // == Study broken tracks
-    // FillTrueBeamPlots("Beam_chi2proton", loose_pions, P_reweight);
-
-    // /////////////////////////////
-    // // ---- TEMPORARY: verify true_beam_endZ vs last traj point ----
-    // static int debug_count = 0;
-    // if (!IsData && debug_count < 20 && abs(evt.true_beam_PDG) == 211) {
-    //     double last_traj_Z = evt.true_beam_traj_Z->empty() ? -999. : evt.true_beam_traj_Z->back();
-    //     cout << Form("Evt %d | true_beam_endZ = %.2f | traj_Z.back() = %.2f | diff = %.3f | endProcess = %s",
-    //                  evt.event,
-    //                  evt.true_beam_endZ,
-    //                  last_traj_Z,
-    //                  evt.true_beam_endZ - last_traj_Z,
-    //                  evt.true_beam_endProcess->c_str())
-    //          << endl;
-    //     debug_count++;
-    // }
-    // // ---- END TEMPORARY ----
-    // /////////////////////////////
-
-    // // ---- TEMPORARY 2:
-    // static int dbg2 = 0;
-    // if (!IsData && dbg2 < 30 && IsInelasticSignal_reco()) {
-    //     cout << Form("Evt %d: pi_type=%d pi_truetype=%d endProcess=%s recoLen=%.1f",
-    //                  evt.event, pi_type, pi_truetype,
-    //                  evt.true_beam_endProcess->c_str(),
-    //                  evt.reco_beam_alt_len)
-    //          << endl;
-    //     dbg2++;
-    // }
-    // // ---- END TEMPORARY 2 ----
-    // /////////////////////////////
-
-    FillXsecHistograms(P_reweight);
+    int N_loose_charged = (int)loose_charged_pions.size();
+    int N_loose_neutral = (int)loose_neutral_pions.size();
+    FillXsecHistograms(P_reweight, N_loose_charged, N_loose_neutral);
 }
 
 void pionqe0p5::StudySecondaryNeutralPions(const vector<Daughter> daughters_all) {
@@ -345,15 +314,6 @@ std::vector<Daughter> pionqe0p5::SelectLooseNeutralPions(const vector<Daughter>&
     return out;
 }
 
-// ------------------------------------------------------------
-// Get_true_tpc_len
-//
-// Returns the true track length inside the TPC, defined as:
-//   from the first trajectory point with Z >= 0 (front face)
-//   to true_beam_endZ.
-// Returns -1 if the front face crossing cannot be found or if
-// the pion ends before entering the TPC.
-// ------------------------------------------------------------
 double pionqe0p5::Get_true_tpc_len() {
     if (IsData) return -1.;
     if (!evt.true_beam_traj_Z || evt.true_beam_traj_Z->empty()) return -1.;
@@ -361,124 +321,64 @@ double pionqe0p5::Get_true_tpc_len() {
     // Find the first traj point at or past Z = 0 (TPC front face)
     double z_ff = -1.;
     for (int i = 0; i < (int)evt.true_beam_traj_Z->size(); i++) {
-        double z = evt.true_beam_traj_Z->at(i);
-        if (z >= 0.) {
-            // Interpolate to Z = 0 if needed
-            if (i > 0) {
-                double z_prev = evt.true_beam_traj_Z->at(i - 1);
-                // z_prev < 0 < z: interpolate linearly
-                z_ff = 0.;  // we define the entry point as z = 0
-            } else {
-                z_ff = z;
-            }
+        if (evt.true_beam_traj_Z->at(i) >= 0.) {
+            z_ff = 0.;
             break;
         }
     }
-    if (z_ff < 0.) return -1.;  // never entered TPC
-
+    if (z_ff < 0.) return -1.;
     double z_end = evt.true_beam_endZ;
-    if (z_end < 0.) return -1.;  // interacted before entering TPC
-
+    if (z_end < 0.) return -1.;
     double true_len = z_end - z_ff;
     if (true_len < 0.) return -1.;
-
     return true_len;
 }
 
-// ------------------------------------------------------------
-// IsInelasticSignal_reco
-//
-// For the reco side: a pion is counted as an inelastic interactor
-// if its true type is one of the beam-matched pion categories.
-// kPiElas includes both true elastic AND pi→mu (endProcess is
-// "pi+Inelastic" but daughter is a muon), so we include it.
-// All six pi2 pion categories (1–6) are signal; background
-// categories (misID, muon) are not.
-// ------------------------------------------------------------
+// Reco-side signal definitions for data return true so every reco interactor
+// fills N_int; the MC purity correction handles channel decomposition.
+// MC-side definitions gate on pi_truetype.
+bool pionqe0p5::IsAbsSignal_reco() { return IsData ? true : (pi_truetype == pitrue::kABS); }
+bool pionqe0p5::IsAbsSignal_true() { return (pi_truetype == pitrue::kABS); }
 
-bool pionqe0p5::IsInelasticSignal_reco() {
-    if (IsData) return true;  // for data, count all track endings
-    return (pi_truetype == pitrue::kQE ||
-            pi_truetype == pitrue::kABS ||
-            pi_truetype == pitrue::kCEX);
+bool pionqe0p5::IsCexSignal_reco() { return IsData ? true : (pi_truetype == pitrue::kCEX); }
+bool pionqe0p5::IsCexSignal_true() { return (pi_truetype == pitrue::kCEX); }
+
+bool pionqe0p5::IsOtherSignal_reco() {
+    return IsData ? true : (pi_truetype == pitrue::kQE || pi_truetype == pitrue::kOther);
+}
+bool pionqe0p5::IsOtherSignal_true() {
+    return (pi_truetype == pitrue::kQE || pi_truetype == pitrue::kOther);
 }
 
-// bool pionqe0p5::IsInelasticSignal_reco() {
-//     return (pi_type == pi2::kPiElas ||
-//             pi_type == pi2::kPiRes ||
-//             pi_type == pi2::kPiQE ||
-//             pi_type == pi2::kPiDCEX ||
-//             pi_type == pi2::kPiABS ||
-//             pi_type == pi2::kPiCEX);
-// }
-
-// ------------------------------------------------------------
-// IsInelasticSignal_true
-//
-// For the true side: inelastic = QE, ABS, or CEX.
-// kElas covers true elastic scattering and range-out → NOT signal.
-// kOther covers non-pion beam particles → NOT signal.
-// ------------------------------------------------------------
-bool pionqe0p5::IsInelasticSignal_true() {
+bool pionqe0p5::IsInelSignal_reco() {
+    return IsData ? true : (pi_truetype == pitrue::kQE || pi_truetype == pitrue::kABS || pi_truetype == pitrue::kCEX || pi_truetype == pitrue::kOther);
+}
+bool pionqe0p5::IsInelSignal_true() {
     return (pi_truetype == pitrue::kQE ||
             pi_truetype == pitrue::kABS ||
-            pi_truetype == pitrue::kCEX);
+            pi_truetype == pitrue::kCEX ||
+            pi_truetype == pitrue::kOther);
 }
 
-// ------------------------------------------------------------
-// FillXsecHistograms
-//
-// Called after all beam selection cuts pass.
-// Fills the following histograms (all in TDirectory "Xsec"):
-//
-//  Reco side (per pi2 category, suffix = "_<pi_type>"):
-//   Xsec_N_inc_reco_<N>   : slice ID for incident pions
-//   Xsec_N_int_reco_<N>   : slice ID for interacting pions (reco signal)
-//   Xsec_KE_reco_slice<S> : KE distribution of incident pions in slice S
-//
-//  True side (MC only, same category suffix):
-//   Xsec_N_inc_true_<N>   : true slice ID for incident pions
-//   Xsec_N_int_true_<N>   : true slice ID for inelastic pions
-//   Xsec_KE_true_slice<S>_<N> : true KE distribution in true slice S
-//
-//  Purity (MC only):
-//   Xsec_purity_all_<N>   : all events after cuts, in reco slice ID
-//   Xsec_purity_signal_<N>: signal events (beam-matched pion) in reco slice ID
-//
-//  Migration (MC only):
-//   Xsec_migration_<N>    : 2D(recoSliceID, trueSliceID) for signal events
-// ------------------------------------------------------------
-void pionqe0p5::FillXsecHistograms(double weight) {
-    // ----------------------------------------------------------
-    // 1. Compute reco slice ID
-    //    The reco track length is reco_beam_alt_len.
-    //    SliceID = floor(track_length / kSliceThickness)
-    //    Clamp to [0, kNSlices-1] to avoid out-of-range fills.
-    // ----------------------------------------------------------
+// Four parallel xsec channels:
+//   inel       : always fills (total inelastic)
+//   abslike    : reco N(loose charged) == 0 && N(loose neutral) == 0
+//   cexlike    : reco N(loose charged) == 0 && N(loose neutral) >= 1
+//   otherlike  : reco N(loose charged) >= 1
+
+void pionqe0p5::FillXsecHistograms(double weight, int N_loose_charged, int N_loose_neutral) {
     double reco_len = evt.reco_beam_alt_len;
-    if (reco_len < 0.) return;  // sanity check
+    if (reco_len < 0.) return;
 
     int recoSliceID = (int)(reco_len / kSliceThickness);
     if (recoSliceID >= kNSlices) recoSliceID = kNSlices - 1;
 
-    // KE at the front face (already computed in executeEvent)
-    double KE_reco = KE_ff_reco;
-
-    // KE at each slice midpoint (for the KE-axis calibration histograms)
-    // We approximate it as KE_ff_reco minus the energy lost traversing
-    // to the midpoint of the slice, using Bethe-Bloch range lookup.
-    // KE_at_slice_mid(s) = KE from range: range(KE_ff) - (s + 0.5) * t
     double range_ff = map_BB[211]->RangeFromKESpline(KE_ff_reco);
 
-    // ----------------------------------------------------------
-    // 2. Fill N_inc (reco): pion is incident on every slice from
-    //    0 up to and including recoSliceID.
-    // ----------------------------------------------------------
+    // N_inc fills: every slice from 0 to recoSliceID
     for (int s = 0; s <= recoSliceID; s++) {
         JSFillHist("Xsec", Form("Xsec_N_inc_reco_%d", pi_type),
                    (double)s, weight, kNSlices, -0.5, kNSlices - 0.5);
-
-        // KE at midpoint of slice s
         double range_at_mid = range_ff - (s + 0.5) * kSliceThickness;
         if (range_at_mid > 0.) {
             double KE_at_mid = map_BB[211]->KEFromRangeSpline(range_at_mid);
@@ -487,50 +387,60 @@ void pionqe0p5::FillXsecHistograms(double weight) {
         }
     }
 
-    // ----------------------------------------------------------
-    // 3. Fill N_int (reco): only the last slice, and only if
-    //    the pion is classified as an inelastic interactor.
-    //    "Inelastic" here = any of the 6 beam-matched pion types
-    //    (kPiElas through kPiCEX). Pions that range out before
-    //    the last slice boundary will not be classified as
-    //    inelastic here — they have pi_type = kPiElas with
-    //    endProcess != "pi+Inelastic", but that still maps to
-    //    kPiElas. We include them because the cross-section
-    //    formula accounts for them via the denominator structure;
-    //    the unfolding and purity correction will handle it.
-    //    Background categories (misID, muon) are NOT filled here.
-    // ----------------------------------------------------------
-    // if (IsInelasticSignal_reco()) {
-    //     JSFillHist("Xsec", Form("Xsec_N_int_reco_%d", pi_type),
-    //                (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
-    // }
-    bool fill_int = IsData ? true : IsInelasticSignal_reco();
-    if (fill_int) {
-        JSFillHist("Xsec", Form("Xsec_N_int_reco_%d", pi_type),
-                   (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
-    }
+    // Reco pool assignment from loose daughter multiplicities
+    bool reco_abslike = (N_loose_charged == 0) && (N_loose_neutral == 0);
+    bool reco_cexlike = (N_loose_charged == 0) && (N_loose_neutral >= 1);
+    bool reco_otherlike = (N_loose_charged >= 1);
 
-    // ----------------------------------------------------------
-    // 4. Purity histograms (MC only)
-    //    purity_all: all events (any category) in this reco slice
-    //    purity_signal: only beam-matched pion events
-    // ----------------------------------------------------------
+    // N_int fills: total inelastic always; exclusive channels gated on reco pool
+    if (IsInelSignal_reco())
+        JSFillHist("Xsec", Form("Xsec_N_int_reco_inel_%d", pi_type),
+                   (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+    if (reco_abslike && IsAbsSignal_reco())
+        JSFillHist("Xsec", Form("Xsec_N_int_reco_abslike_%d", pi_type),
+                   (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+    if (reco_cexlike && IsCexSignal_reco())
+        JSFillHist("Xsec", Form("Xsec_N_int_reco_cexlike_%d", pi_type),
+                   (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+    if (reco_otherlike && IsOtherSignal_reco())
+        JSFillHist("Xsec", Form("Xsec_N_int_reco_otherlike_%d", pi_type),
+                   (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+
+    // Purity decomposition (MC only): denominator is all selected events in the
+    // reco pool; numerator is events whose true channel matches the pool name.
     if (!IsData) {
         JSFillHist("Xsec", Form("Xsec_purity_all_%d", pi_type),
                    (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
-
-        if (IsInelasticSignal_reco()) {
-            JSFillHist("Xsec", Form("Xsec_purity_signal_%d", pi_type),
+        if (IsInelSignal_true())
+            JSFillHist("Xsec", Form("Xsec_purity_sig_inel_%d", pi_type),
                        (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+
+        if (reco_abslike) {
+            JSFillHist("Xsec", Form("Xsec_purity_all_abslike_%d", pi_type),
+                       (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+            if (IsAbsSignal_true())
+                JSFillHist("Xsec", Form("Xsec_purity_sig_abslike_%d", pi_type),
+                           (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+        }
+        if (reco_cexlike) {
+            JSFillHist("Xsec", Form("Xsec_purity_all_cexlike_%d", pi_type),
+                       (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+            if (IsCexSignal_true())
+                JSFillHist("Xsec", Form("Xsec_purity_sig_cexlike_%d", pi_type),
+                           (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+        }
+        if (reco_otherlike) {
+            JSFillHist("Xsec", Form("Xsec_purity_all_otherlike_%d", pi_type),
+                       (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+            if (IsOtherSignal_true())
+                JSFillHist("Xsec", Form("Xsec_purity_sig_otherlike_%d", pi_type),
+                           (double)recoSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
         }
     }
 
-    // ----------------------------------------------------------
-    // 5. True side (MC only)
-    // ----------------------------------------------------------
     if (!IsData) {
         double true_len = Get_true_tpc_len();
-        if (true_len < 0.) return;  // pion didn't enter TPC
+        if (true_len < 0.) return;
 
         int trueSliceID = (int)(true_len / kSliceThickness);
         if (trueSliceID >= kNSlices) trueSliceID = kNSlices - 1;
@@ -538,11 +448,9 @@ void pionqe0p5::FillXsecHistograms(double weight) {
         double KE_ff_true = Get_true_ffKE();
         double range_ff_true = (KE_ff_true > 0.) ? map_BB[211]->RangeFromKESpline(KE_ff_true) : -1.;
 
-        // -- N_inc (true)
         for (int s = 0; s <= trueSliceID; s++) {
             JSFillHist("Xsec", Form("Xsec_N_inc_true_%d", pi_type),
                        (double)s, weight, kNSlices, -0.5, kNSlices - 0.5);
-
             if (range_ff_true > 0.) {
                 double range_at_mid_true = range_ff_true - (s + 0.5) * kSliceThickness;
                 if (range_at_mid_true > 0.) {
@@ -553,22 +461,43 @@ void pionqe0p5::FillXsecHistograms(double weight) {
             }
         }
 
-        // -- N_int (true): only fill if this is a true inelastic interaction
-        if (IsInelasticSignal_true()) {
-            JSFillHist("Xsec", Form("Xsec_N_int_true_%d", pi_type),
+        if (IsInelSignal_true())
+            JSFillHist("Xsec", Form("Xsec_N_int_true_inel_%d", pi_type),
                        (double)trueSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
-        }
+        if (IsAbsSignal_true())
+            JSFillHist("Xsec", Form("Xsec_N_int_true_abslike_%d", pi_type),
+                       (double)trueSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+        if (IsCexSignal_true())
+            JSFillHist("Xsec", Form("Xsec_N_int_true_cexlike_%d", pi_type),
+                       (double)trueSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
+        if (IsOtherSignal_true())
+            JSFillHist("Xsec", Form("Xsec_N_int_true_otherlike_%d", pi_type),
+                       (double)trueSliceID, weight, kNSlices, -0.5, kNSlices - 0.5);
 
-        // -- Migration matrix: reco vs true slice ID
-        //    Only fill for beam-matched pion events (signal categories)
-        if (!IsData && IsInelasticSignal_reco()) {
-            JSFillHist("Xsec", Form("Xsec_migration_%d", pi_type),
+        // Migration: reco slice vs true slice, reco information.
+        // _inel uses any reco signal (i.e. always for data, IsInelSignal_reco for MC);
+        // exclusive channels also require true type to match for a clean efficiency matrix.
+        if (IsInelSignal_reco())
+            JSFillHist("Xsec", Form("Xsec_migration_inel_%d", pi_type),
                        (double)recoSliceID, (double)trueSliceID, weight,
                        kNSlices, -0.5, kNSlices - 0.5,
                        kNSlices, -0.5, kNSlices - 0.5);
-        }
-
-    }  // end MC-only block
+        if (reco_abslike && IsAbsSignal_true())
+            JSFillHist("Xsec", Form("Xsec_migration_abslike_%d", pi_type),
+                       (double)recoSliceID, (double)trueSliceID, weight,
+                       kNSlices, -0.5, kNSlices - 0.5,
+                       kNSlices, -0.5, kNSlices - 0.5);
+        if (reco_cexlike && IsCexSignal_true())
+            JSFillHist("Xsec", Form("Xsec_migration_cexlike_%d", pi_type),
+                       (double)recoSliceID, (double)trueSliceID, weight,
+                       kNSlices, -0.5, kNSlices - 0.5,
+                       kNSlices, -0.5, kNSlices - 0.5);
+        if (reco_otherlike && IsOtherSignal_true())
+            JSFillHist("Xsec", Form("Xsec_migration_otherlike_%d", pi_type),
+                       (double)recoSliceID, (double)trueSliceID, weight,
+                       kNSlices, -0.5, kNSlices - 0.5,
+                       kNSlices, -0.5, kNSlices - 0.5);
+    }
 }
 
 /////////////////////////////////

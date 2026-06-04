@@ -1,25 +1,3 @@
-// ============================================================
-// plot_xsec.C
-// Thin-slice cross-section plots for ProtoDUNE 0.5 GeV/c pi+ analysis.
-// Restructured to run common (signal-independent) plots once and
-// per-tag (signal-dependent) plots once per signal definition.
-//
-// Usage:
-//   root -l -b -q plot_xsec.C            // both signal definitions (default)
-//   root -l -b -q 'plot_xsec.C(0)'       // both, explicit
-//   root -l -b -q 'plot_xsec.C(1)'       // absorption only
-//   root -l -b -q 'plot_xsec.C(2)'       // total inelastic only
-//
-// Input: hists_MC_0.5GeV_pionqe0p5.root
-//        hists_Data_0.5GeV_pionqe0p5.root
-//        data/v1/GEANT4_XS/pion_xsec_1GeV.root
-//
-// Output:
-//   plots_xsec_common/       (signal-independent: efficiency, KE map)
-//   plots_xsec_abs/          (absorption signal)
-//   plots_xsec_inel/         (total-inelastic signal, B2-inclusive)
-// ============================================================
-
 #include "TCanvas.h"
 #include "TF1.h"
 #include "TFile.h"
@@ -136,6 +114,42 @@ vector<SliceKE> GetKEPerSlice(TFile* f, TString dir,
     return out;
 }
 
+vector<SliceKE> GetKEPerSliceSummed(TFile* f, TString dir, TString prefix,
+                                    vector<int> cats, bool use_mpv = false) {
+    vector<SliceKE> out;
+    for (int s = 0; s < n_slices; s++) {
+        TH1D* hsum = nullptr;
+        for (int c : cats) {
+            TString hname = Form("%s%d_%d", prefix.Data(), s, c);
+            TH1D* h = GetH1(f, dir, hname);
+            if (!h) continue;
+            if (!hsum) {
+                hsum = (TH1D*)h->Clone();
+                hsum->SetDirectory(0);
+            } else
+                hsum->Add(h);
+            delete h;
+        }
+        if (!hsum || hsum->GetEntries() < 5) {
+            delete hsum;
+            continue;
+        }
+        SliceKE sk;
+        sk.id = s;
+        if (!use_mpv) {
+            sk.ke = hsum->GetMean();
+            sk.ke_err = hsum->GetMeanError();
+        } else {
+            int mb = hsum->GetMaximumBin();
+            sk.ke = hsum->GetBinCenter(mb);
+            sk.ke_err = hsum->GetBinWidth(mb) / 2.;
+        }
+        out.push_back(sk);
+        delete hsum;
+    }
+    return out;
+}
+
 TGraphErrors* ComputeXsec(TH1D* h_inc, TH1D* h_int,
                           TH1D* h_eff = nullptr,
                           const vector<SliceKE>* ke_map = nullptr,
@@ -202,8 +216,8 @@ void SaveCanvas(TCanvas* c, TString name, TString plotdir) {
 }
 
 // ============================================================
-// Load a Geant4 cross-section curve from the tabulated file.
-// Channels (from data/v1/GEANT4_XS/histmap.txt):
+// Load a Geant4 cross-section curve from data/v1/GEANT4_XS/histmap.txt
+// Channels:
 //   abs_KE         -> absorption
 //   cex_KE         -> charge exchange
 //   dcex_KE        -> double CEX
@@ -276,8 +290,11 @@ TH1D* plot_xsec_common(TString plotdir,
         h_eff->Divide(h_inc_mc_true);
     }
 
+    // here ke_reco_out is the average of the BB-predicted KE at this slice (see pionqe0p5.C's ke_reco_out),
+    // given each event's KE_ff_reco
     ke_reco_out = GetKEPerSlice(fMC, "Xsec", "Xsec_KE_reco_slice", "", false);
-    ke_true_out = GetKEPerSlice(fMC, "Xsec", "Xsec_KE_true_slice", "_1", false);
+    // ke_true_out = GetKEPerSlice(fMC, "Xsec", "Xsec_KE_true_slice", "_1", false);
+    ke_true_out = GetKEPerSliceSummed(fMC, "Xsec", "Xsec_KE_true_slice", {1, 2, 3, 4, 5, 6}, false);
     printf("KE maps: reco=%d slices, true=%d slices\n",
            (int)ke_reco_out.size(), (int)ke_true_out.size());
 
@@ -366,28 +383,35 @@ TH1D* plot_xsec_common(TString plotdir,
     return h_eff;
 }
 
-void plot_xsec_one(TString signal_tag, TString plotdir,
-                   TH1D* h_eff_in,
-                   const std::vector<SliceKE>& ke_reco,
-                   const std::vector<SliceKE>& ke_true) {
+TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
+                            TH1D* h_eff_in,
+                            const std::vector<SliceKE>& ke_reco,
+                            const std::vector<SliceKE>& ke_true) {
     gStyle->SetOptStat(0);
     gStyle->SetOptTitle(0);
 
     TString sig_subscript;
     TString sig_long;
     TString g4_histname;
-    if (signal_tag == "abs") {
-        sig_subscript = "abs";
-        sig_long = "Absorption";
-        g4_histname = "abs_KE";
-    } else if (signal_tag == "inel") {
+    if (signal_tag == "inel") {
         sig_subscript = "inel";
         sig_long = "Total inelastic";
         g4_histname = "total_inel_KE";
+    } else if (signal_tag == "abslike") {
+        sig_subscript = "abs";
+        sig_long = "Absorption";
+        g4_histname = "abs_KE";
+    } else if (signal_tag == "cexlike") {
+        sig_subscript = "cex";
+        sig_long = "Charge exchange";
+        g4_histname = "cex_KE";
+    } else if (signal_tag == "otherlike") {
+        sig_subscript = "QE";
+        sig_long = "Quasi-elastic + other";
+        g4_histname = "inel_KE";
     } else {
-        printf("ERROR: unknown signal_tag '%s'. Use 'abs' or 'inel'.\n",
-               signal_tag.Data());
-        return;
+        printf("ERROR: unknown signal_tag '%s'.\n", signal_tag.Data());
+        return nullptr;
     }
     printf("\n========================================================\n");
     printf("  Running plot_xsec_one for signal_tag=%s\n", signal_tag.Data());
@@ -398,14 +422,19 @@ void plot_xsec_one(TString signal_tag, TString plotdir,
     TFile* fData = TFile::Open("hists_Data_0.5GeV_pionqe0p5.root");
     if (!fMC || fMC->IsZombie()) {
         printf("ERROR: cannot open MC file\n");
-        return;
+        return nullptr;
     }
     if (!fData || fData->IsZombie()) {
         printf("ERROR: cannot open Data file\n");
-        return;
+        return nullptr;
     }
 
+    TString pur_all_basename = (signal_tag == "inel")
+                                   ? "Xsec_purity_all"
+                                   : Form("Xsec_purity_all_%s", signal_tag.Data());
+
     TH1D* h_inc_data = GetH1(fData, "Xsec", "Xsec_N_inc_reco_0");
+
     TH1D* h_int_data = GetH1(fData, "Xsec",
                              Form("Xsec_N_int_reco_%s_0", signal_tag.Data()));
     TH1D* h_inc_mc_reco = SumCats(fMC, "Xsec", "Xsec_N_inc_reco");
@@ -414,12 +443,29 @@ void plot_xsec_one(TString signal_tag, TString plotdir,
     TH1D* h_inc_mc_true = SumCats(fMC, "Xsec", "Xsec_N_inc_true");
     TH1D* h_int_mc_true = SumCats(fMC, "Xsec",
                                   Form("Xsec_N_int_true_%s", signal_tag.Data()));
-    TH1D* h_pur_all = SumCats(fMC, "Xsec", "Xsec_purity_all");
+    TH1D* h_pur_all = SumCats(fMC, "Xsec", pur_all_basename);
     TH1D* h_pur_sig = SumCats(fMC, "Xsec",
-                              Form("Xsec_purity_signal_%s", signal_tag.Data()),
+                              Form("Xsec_purity_sig_%s", signal_tag.Data()),
                               1, 6);
     TH2D* h_migration = SumCats2D(fMC, "Xsec",
                                   Form("Xsec_migration_%s", signal_tag.Data()));
+
+    // Per-channel true-KE map. Mapping of signal tag to pi_type categories:
+    //   inel      -> 1..6 (all beam-matched pions)
+    //   abslike   -> 5    (PiABS)
+    //   cexlike   -> 6    (PiCEX)
+    //   otherlike -> 1..4 (PiElas, PiRes, PiQE, PiDCEX)
+    vector<int> true_cats_for_channel;
+    if (signal_tag == "inel")
+        true_cats_for_channel = {1, 2, 3, 4, 5, 6};
+    else if (signal_tag == "abslike")
+        true_cats_for_channel = {5};
+    else if (signal_tag == "cexlike")
+        true_cats_for_channel = {6};
+    else
+        true_cats_for_channel = {1, 2, 3, 4};
+    vector<SliceKE> ke_true_channel = GetKEPerSliceSummed(
+        fMC, "Xsec", "Xsec_KE_true_slice", true_cats_for_channel, false);
 
     // -- Purity
     TH1D* h_purity = nullptr;
@@ -441,13 +487,20 @@ void plot_xsec_one(TString signal_tag, TString plotdir,
         h_int_data_pur->Multiply(h_purity);
     }
 
-    // -- Cross-section graphs
+    // // -- Cross-section graphs
+    // TGraphErrors* g_xsec_mc_reco =
+    //     ComputeXsec(h_inc_mc_reco, h_int_mc_reco, nullptr, &ke_reco, "mc_reco_raw");
+    // TGraphErrors* g_xsec_data_pur =
+    //     ComputeXsec(h_inc_data_pur, h_int_data_pur, nullptr, &ke_reco, "data_purity");
+    // TGraphErrors* g_xsec_data_corr =
+    //     ComputeXsec(h_inc_data_pur, h_int_data_pur, h_eff_in, &ke_reco, "data_corr");
+
     TGraphErrors* g_xsec_mc_reco =
-        ComputeXsec(h_inc_mc_reco, h_int_mc_reco, nullptr, &ke_reco, "mc_reco_raw");
+        ComputeXsec(h_inc_mc_reco, h_int_mc_reco, nullptr, &ke_true_channel, "mc_reco_raw");
     TGraphErrors* g_xsec_data_pur =
-        ComputeXsec(h_inc_data_pur, h_int_data_pur, nullptr, &ke_reco, "data_purity");
+        ComputeXsec(h_inc_data_pur, h_int_data_pur, nullptr, &ke_true_channel, "data_purity");
     TGraphErrors* g_xsec_data_corr =
-        ComputeXsec(h_inc_data_pur, h_int_data_pur, h_eff_in, &ke_reco, "data_corr");
+        ComputeXsec(h_inc_data_pur, h_int_data_pur, h_eff_in, &ke_true_channel, "data_corr");
 
     // -- Geant4 reference curve
     TGraph* g_g4 = LoadG4Xsec(g4_histname);
@@ -539,9 +592,15 @@ void plot_xsec_one(TString signal_tag, TString plotdir,
             l->SetLineStyle(2);
             l->SetLineColor(kBlue);
             l->Draw();
-            TString sig_label = (signal_tag == "abs")
-                                    ? "Signal = kABS"
-                                    : "Signal = kQE + kABS + kCEX + kOther";
+            TString sig_label;
+            if (signal_tag == "inel")
+                sig_label = "Signal = kQE + kABS + kCEX + kOther";
+            else if (signal_tag == "abslike")
+                sig_label = "Signal = kABS";
+            else if (signal_tag == "cexlike")
+                sig_label = "Signal = kCEX";
+            else
+                sig_label = "Signal = kQE + kOther";
             DrawLabels(sig_label);
         }
         SaveCanvas(c, "xsec_purity", plotdir);
@@ -714,6 +773,67 @@ void plot_xsec_one(TString signal_tag, TString plotdir,
         delete c;
     }
 
+    // ============================================================
+    // Plot 5: Reco vs True KE per slice, for this channel
+    // ============================================================
+    if (!ke_reco.empty() && !ke_true_channel.empty()) {
+        TCanvas* c = new TCanvas("c_ke_channel", "", 1200, 500);
+        c->Divide(2, 1);
+        int np = std::min(ke_reco.size(), ke_true_channel.size());
+        vector<double> xv, yr, yt, exv, eyr, eyt, yd, eyd;
+        for (int i = 0; i < np; i++) {
+            xv.push_back(ke_reco[i].id);
+            yr.push_back(ke_reco[i].ke);
+            eyr.push_back(ke_reco[i].ke_err);
+            yt.push_back(ke_true_channel[i].ke);
+            eyt.push_back(ke_true_channel[i].ke_err);
+            exv.push_back(0.);
+            yd.push_back(yr[i] - yt[i]);
+            eyd.push_back(sqrt(eyr[i] * eyr[i] + eyt[i] * eyt[i]));
+        }
+        c->cd(1);
+        TGraphErrors* gr = new TGraphErrors(np, xv.data(), yr.data(), exv.data(), eyr.data());
+        TGraphErrors* gt = new TGraphErrors(np, xv.data(), yt.data(), exv.data(), eyt.data());
+        gr->SetMarkerStyle(20);
+        gr->SetMarkerColor(kRed + 1);
+        gr->SetLineColor(kRed + 1);
+        gr->SetMarkerSize(0.8);
+        gt->SetMarkerStyle(20);
+        gt->SetMarkerColor(kBlack);
+        gt->SetLineColor(kBlack);
+        gt->SetMarkerSize(0.8);
+        gr->GetXaxis()->SetTitle("Slice ID");
+        gr->GetYaxis()->SetTitle("#pi^{+} KE (MeV)");
+        gr->SetTitle("");
+        gr->Draw("AP");
+        gt->Draw("P SAME");
+        TLegend* l1 = new TLegend(0.55, 0.72, 0.88, 0.84);
+        l1->AddEntry(gr, "Reco KE (mean)", "p");
+        l1->AddEntry(gt, Form("True KE (%s)", sig_long.Data()), "p");
+        l1->SetBorderSize(0);
+        l1->Draw();
+        DrawLabels(sig_long);
+        c->cd(2);
+        TGraphErrors* gd = new TGraphErrors(np, xv.data(), yd.data(), exv.data(), eyd.data());
+        gd->SetMarkerStyle(20);
+        gd->SetMarkerSize(0.8);
+        gd->SetLineColor(kBlack);
+        gd->SetMarkerColor(kBlack);
+        gd->GetXaxis()->SetTitle("Slice ID");
+        gd->GetYaxis()->SetTitle("Reco KE #minus True KE (MeV)");
+        gd->SetTitle("");
+        gd->Draw("AP");
+        TLine* l0 = new TLine(gd->GetXaxis()->GetXmin(), 0., gd->GetXaxis()->GetXmax(), 0.);
+        l0->SetLineStyle(2);
+        l0->SetLineColor(kBlue);
+        l0->Draw();
+        DrawLabels(sig_long);
+        SaveCanvas(c, "xsec_KE_reco_vs_true", plotdir);
+        delete c;
+    }
+
+    TGraphErrors* g_return = g_xsec_data_corr ? (TGraphErrors*)g_xsec_data_corr->Clone(Form("g_return_%s", signal_tag.Data())) : nullptr;
+
     // -- Cleanup
     delete h_inc_data;
     delete h_int_data;
@@ -735,27 +855,24 @@ void plot_xsec_one(TString signal_tag, TString plotdir,
     fMC->Close();
     fData->Close();
     printf("\nDone with %s. Plots saved in %s/\n", signal_tag.Data(), plotdir.Data());
+
+    return g_return;
 }
 
 // ============================================================
-// Entry point. Runs Stage A once, then Stage B for chosen tags.
-//
 // Usage:
 //   root -l -b -q plot_xsec.C            // both (default)
 //   root -l -b -q 'plot_xsec.C(0)'       // both, explicit
 //   root -l -b -q 'plot_xsec.C(1)'       // absorption only
 //   root -l -b -q 'plot_xsec.C(2)'       // total inelastic only
 // ============================================================
-void plot_xsec(int which = 0) {
-    bool do_abs = (which == 0 || which == 1);
-    bool do_inel = (which == 0 || which == 2);
-    if (!do_abs && !do_inel) {
-        printf("ERROR: invalid `which`=%d. Use 0 (both), 1 (abs), or 2 (inel).\n",
-               which);
-        return;
-    }
 
-    // Stage A: common (signal-independent) plots
+void plot_xsec(int which = 0) {
+    bool do_inel = (which == 0 || which == 1);
+    bool do_abs = (which == 0 || which == 2);
+    bool do_cex = (which == 0 || which == 3);
+    bool do_other = (which == 0 || which == 4);
+
     std::vector<SliceKE> ke_reco, ke_true;
     TH1D* h_eff = plot_xsec_common("plots_xsec_common", ke_reco, ke_true);
     if (!h_eff) {
@@ -763,12 +880,34 @@ void plot_xsec(int which = 0) {
         return;
     }
 
-    // Stage B: per-signal-definition plots
-    if (do_abs) plot_xsec_one("abs", "plots_xsec_abs", h_eff, ke_reco, ke_true);
-    if (do_inel) plot_xsec_one("inel", "plots_xsec_inel", h_eff, ke_reco, ke_true);
+    TGraphErrors *g_inel = nullptr, *g_abs = nullptr, *g_cex = nullptr, *g_other = nullptr;
+    if (do_inel) g_inel = plot_xsec_one("inel", "plots_xsec_inel", h_eff, ke_reco, ke_true);
+    if (do_abs) g_abs = plot_xsec_one("abslike", "plots_xsec_abslike", h_eff, ke_reco, ke_true);
+    if (do_cex) g_cex = plot_xsec_one("cexlike", "plots_xsec_cexlike", h_eff, ke_reco, ke_true);
+    if (do_other) g_other = plot_xsec_one("otherlike", "plots_xsec_otherlike", h_eff, ke_reco, ke_true);
 
+    // Sum-check: per-KE-bin comparison of inel vs (abs + cex + other).
+    if (g_inel && g_abs && g_cex && g_other) {
+        printf("\n=== Sum check: inel vs (abs + cex + other) ===\n");
+        printf("%-10s  %-12s  %-12s  %-12s  %-12s  %-12s  %-8s\n",
+               "KE[MeV]", "inel", "abs", "cex", "other", "abs+cex+oth", "ratio");
+        int n = g_inel->GetN();
+        for (int i = 0; i < n; i++) {
+            double x_inel, y_inel;
+            g_inel->GetPoint(i, x_inel, y_inel);
+            double y_abs = g_abs->Eval(x_inel);
+            double y_cex = g_cex->Eval(x_inel);
+            double y_oth = g_other->Eval(x_inel);
+            double sum = y_abs + y_cex + y_oth;
+            double ratio = (y_inel > 0.) ? sum / y_inel : 0.;
+            printf("%-10.1f  %-12.1f  %-12.1f  %-12.1f  %-12.1f  %-12.1f  %.3f\n",
+                   x_inel, y_inel, y_abs, y_cex, y_oth, sum, ratio);
+        }
+    }
+
+    delete g_inel;
+    delete g_abs;
+    delete g_cex;
+    delete g_other;
     delete h_eff;
-    printf("\n========================================================\n");
-    printf("  All cross-section extractions complete.\n");
-    printf("========================================================\n");
 }

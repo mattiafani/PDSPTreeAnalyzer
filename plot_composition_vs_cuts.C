@@ -5,6 +5,13 @@
 // at each cut stage and shows how the category composition (%)
 // evolves through the cuts.
 //
+// Normalization convention:
+//   Single global MC->data scale, computed once at Beam_scraper
+//   using Beam_P_beam_inst over its full filled range. This matches
+//   the normalization point used by plot_beamsel.C's plot legends
+//   and reveals the growing data/MC discrepancy at later stages
+//   (data marker drops below MC total).
+//
 // Usage:  root -l -b -q plot_composition_vs_cuts.C
 // ============================================================
 
@@ -59,33 +66,71 @@ Stage stages[NSTAGES] = {
 // Variable definition
 // ============================================================
 struct VarDef {
-    TString suffix;  // output filename suffix
-    TString branch;  // histogram name fragment after the dir prefix
-    TString xtitle;  // shown in the annotation
-    // compMin/compMax: range integrated to compute composition fractions.
-    //   -1,-1 = full histogram range.
-    //   Binary variables: set to signal bin [0,1].
-    //   Continuous variables: set to the physically meaningful window.
-    double compMin, compMax;
+    TString suffix;
+    TString branch;
+    TString xtitle;
+    double compMin, compMax;  // -1,-1 = full range
 };
 
 // ============================================================
-// Get integrals for every category at one stage.
-// normalize: if true, scale MC so total MC = total data (full range).
-// compMin/compMax: integration window (-1,-1 = full range).
-// dataYield: raw data count over the compWindow (or full range).
-// Returns false if MC histograms are not found.
+// Compute the single global MC->data scale at the scraper stage,
+// using Beam_P_beam_inst over its full filled range.
+// ============================================================
+double ComputeGlobalScale(TFile* fMC, TFile* fData) {
+    TDirectory* dMC = (TDirectory*)fMC->Get("Beam_scraper");
+    TDirectory* dData = (TDirectory*)fData->Get("Beam_scraper");
+    if (!dMC || !dData) {
+        printf(
+            "WARNING: Beam_scraper directory not found in MC or Data; "
+            "falling back to scale=1.0\n");
+        return 1.;
+    }
+    const TString prefix = "Beam_scraper_Beam_P_beam_inst";
+
+    // Data
+    TH1D* hData = (TH1D*)dData->Get(prefix);
+    if (!hData) hData = (TH1D*)dData->Get(prefix + "_0");
+    double dataTotal = (hData) ? hData->Integral() : -1.;
+
+    // MC summed over categories
+    double mcTotal = 0.;
+    for (int i = 1; i <= NCAT; i++) {
+        TH1D* h = (TH1D*)dMC->Get(prefix + Form("_%d", i));
+        if (h) mcTotal += h->Integral();
+    }
+
+    if (dataTotal <= 0. || mcTotal <= 0.) {
+        printf(
+            "WARNING: cannot compute scale (mcTotal=%.1f, dataTotal=%.1f); "
+            "falling back to 1.0\n",
+            mcTotal, dataTotal);
+        return 1.;
+    }
+    double scale = dataTotal / mcTotal;
+    printf(
+        "\n==> Global MC->data scale (Beam_scraper / Beam_P_beam_inst): "
+        "%.4f (Data=%.1f / MC=%.1f)\n\n",
+        scale, dataTotal, mcTotal);
+    return scale;
+}
+
+// ============================================================
+// Per-stage category yields and data yield.
+// fixedScale: the precomputed MC->data scale (no per-stage rescaling).
+// compMin/compMax: integration window (-1,-1 = full filled range).
+// Returns false if MC at this stage is empty / missing.
 // ============================================================
 bool GetStageComposition(TFile* fMC, TFile* fData,
                          TString dir, TString branch,
                          double compMin, double compMax,
-                         bool normalize,
+                         bool normalize, double fixedScale,
                          double yields[NCAT + 1],
                          double& dataYield) {
     TString prefix = dir + "_" + branch;
     bool hasComp = (compMin >= 0. && compMax > compMin);
+    double scale = (normalize) ? fixedScale : 1.;
 
-    // --- data histogram
+    // --- data
     TDirectory* dData = (TDirectory*)fData->Get(dir);
     TH1D* hData = nullptr;
     if (dData) {
@@ -105,7 +150,7 @@ bool GetStageComposition(TFile* fMC, TFile* fData,
         dataYield = -1.;
     }
 
-    // --- MC histograms
+    // --- MC per category
     TDirectory* dMC = (TDirectory*)fMC->Get(dir);
     if (!dMC) {
         delete hData;
@@ -113,37 +158,22 @@ bool GetStageComposition(TFile* fMC, TFile* fData,
     }
 
     TH1D* hCat[NCAT + 1] = {};
-    TH1D* hTotal = nullptr;
     bool anyFound = false;
+    double mcSumIntegralCheck = 0.;
     for (int i = 1; i <= NCAT; i++) {
         TH1D* h = (TH1D*)dMC->Get(prefix + Form("_%d", i));
         if (!h) continue;
         h->SetDirectory(0);
         hCat[i] = h;
         anyFound = true;
-        if (!hTotal) {
-            hTotal = (TH1D*)h->Clone("_htot");
-            hTotal->SetDirectory(0);
-        } else {
-            hTotal->Add(h);
-        }
+        mcSumIntegralCheck += h->Integral();
     }
-    if (!anyFound || !hTotal || hTotal->Integral() == 0) {
+    if (!anyFound || mcSumIntegralCheck == 0.) {
         delete hData;
-        delete hTotal;
         for (int i = 1; i <= NCAT; i++) delete hCat[i];
         return false;
     }
 
-    // MC->data scale factor over full range (matches plot_beamsel.C convention)
-    double scale = 1.;
-    if (normalize && hData) {
-        double mcTotal = hTotal->Integral();
-        double dataTotal = hData->Integral();
-        scale = (mcTotal > 0) ? dataTotal / mcTotal : 1.;
-    }
-
-    // per-category integrals over compWindow
     yields[0] = 0.;
     for (int i = 1; i <= NCAT; i++) {
         if (hCat[i]) {
@@ -163,13 +193,12 @@ bool GetStageComposition(TFile* fMC, TFile* fData,
     }
 
     delete hData;
-    delete hTotal;
     for (int i = 1; i <= NCAT; i++) delete hCat[i];
     return true;
 }
 
 // ============================================================
-// Label color
+// Label color helper
 // ============================================================
 int LabelColor(int fillColor) {
     switch (fillColor) {
@@ -189,7 +218,7 @@ int LabelColor(int fillColor) {
 // ============================================================
 void DrawCompositionPlot(TFile* fMC, TFile* fData,
                          const VarDef& vd,
-                         bool normalize,
+                         bool normalize, double globalScale,
                          TString plotdir = "plots") {
     printf("==== Composition plot: %s (normalize=%s) ====\n",
            vd.suffix.Data(), normalize ? "true" : "false");
@@ -202,16 +231,13 @@ void DrawCompositionPlot(TFile* fMC, TFile* fData,
         ok[s] = GetStageComposition(fMC, fData,
                                     stages[s].dir, vd.branch,
                                     vd.compMin, vd.compMax,
-                                    normalize,
+                                    normalize, globalScale,
                                     yields[s], dataYield[s]);
         if (!ok[s])
             printf("  WARNING: stage %s not found for branch %s\n",
                    stages[s].dir.Data(), vd.branch.Data());
     }
 
-    // ----------------------------------------------------------------
-    // Build TH1D per category (absolute counts and fractions)
-    // ----------------------------------------------------------------
     TH1D* hAbs[NCAT + 1] = {};
     TH1D* hFrac[NCAT + 1] = {};
 
@@ -240,7 +266,7 @@ void DrawCompositionPlot(TFile* fMC, TFile* fData,
     TGraphErrors* grData = new TGraphErrors(NSTAGES);
     for (int s = 0; s < NSTAGES; s++) {
         grData->SetPoint(s, s + 0.5, ok[s] ? dataYield[s] : 0.);
-        grData->SetPointError(s, 0.5, 0.);  // x±0.5 = full bin, no y error
+        grData->SetPointError(s, 0.5, (ok[s] && dataYield[s] > 0) ? TMath::Sqrt(dataYield[s]) : 0.);
     }
     grData->SetMarkerStyle(20);
     grData->SetMarkerSize(1.2);
@@ -248,9 +274,7 @@ void DrawCompositionPlot(TFile* fMC, TFile* fData,
     grData->SetLineColor(kBlack);
     grData->SetLineWidth(2);
 
-    // ----------------------------------------------------------------
     // Canvas
-    // ----------------------------------------------------------------
     TCanvas* c = new TCanvas("cComp", "", 1050, 900);
     c->SetFillColor(0);
 
@@ -269,9 +293,7 @@ void DrawCompositionPlot(TFile* fMC, TFile* fData,
     pad1->Draw();
     pad2->Draw();
 
-    // ================================================================
-    // TOP PAD: raw MC counts + raw data markers
-    // ================================================================
+    // ------- top pad
     pad1->cd();
     pad1->SetTicks(1, 1);
 
@@ -286,7 +308,6 @@ void DrawCompositionPlot(TFile* fMC, TFile* fData,
     stkAbs->GetYaxis()->SetLabelSize(0.052);
     stkAbs->GetYaxis()->SetNdivisions(506);
 
-    // y-axis
     double ymax = 0.;
     for (int s = 0; s < NSTAGES; s++) {
         if (!ok[s]) continue;
@@ -296,7 +317,6 @@ void DrawCompositionPlot(TFile* fMC, TFile* fData,
     stkAbs->SetMaximum(ymax * 2.35);
     stkAbs->SetMinimum(0.);
 
-    //
     for (int s = 0; s < NSTAGES; s += 2) {
         TBox* shd = new TBox(s, 0., s + 1, ymax * 2.35);
         shd->SetFillColorAlpha(kGray, 0.15);
@@ -337,7 +357,7 @@ void DrawCompositionPlot(TFile* fMC, TFile* fData,
     lat.SetTextSize(0.060);
     lat.DrawLatex(0.67, 0.912, "0.5 GeV/c Beam");
 
-    // Variable + window annotation
+    // Annotation
     bool hasCompWin = (vd.compMin >= 0. && vd.compMax > vd.compMin);
     lat.SetTextFont(62);
     lat.SetTextSize(0.042);
@@ -355,9 +375,26 @@ void DrawCompositionPlot(TFile* fMC, TFile* fData,
                       Form("Comp. window: full range of %s", vd.xtitle.Data()));
     lat.SetTextColor(kBlack);
 
-    // ================================================================
-    // BOTTOM PAD: fractional composition [%]
-    // ================================================================
+    // Data/MC ratio label, only shown in normalized plots if the ratio is physically meaningful
+    if (normalize) {
+        TLatex lr;
+        lr.SetTextSize(0.030);
+        lr.SetTextAlign(22);
+        lr.SetTextFont(42);
+        for (int s = 0; s < NSTAGES; s++) {
+            if (!ok[s] || yields[s][0] <= 0 || dataYield[s] <= 0) continue;
+            double r = dataYield[s] / yields[s][0];
+            double yTxt = TMath::Max(yields[s][0], dataYield[s]) * 1.06;
+            // color: black for ~1.0, red for noticeable departures
+            int col = (TMath::Abs(r - 1.) < 0.05)   ? kBlack
+                      : (TMath::Abs(r - 1.) < 0.15) ? kGray + 2
+                                                    : kRed + 1;
+            lr.SetTextColor(col);
+            lr.DrawLatex(s + 0.5, yTxt, Form("Obs/Pred=%.2f", r));
+        }
+    }
+
+    // ------- bottom pad
     pad2->cd();
     pad2->SetTicks(1, 1);
 
@@ -387,7 +424,6 @@ void DrawCompositionPlot(TFile* fMC, TFile* fData,
     }
     stkFrac->Draw("HIST SAME");
 
-    // Percentage labels
     const double kMinLabelFrac = 6.0;
     const double kMinBandHeight = 5.5;
     for (int s = 0; s < NSTAGES; s++) {
@@ -415,7 +451,6 @@ void DrawCompositionPlot(TFile* fMC, TFile* fData,
         vl->Draw();
     }
 
-    // Save
     gSystem->mkdir(plotdir, kTRUE);
     TString pdfName = Form("composition_%s_%s", vd.suffix.Data(),
                            normalize ? "norm" : "raw");
@@ -451,25 +486,12 @@ void plot_composition_vs_cuts() {
         return;
     }
 
-    // ----------------------------------------------------------------
-    // Complete variable list matching all branches in plot_beamsel.C
-    //
-    // compMin/compMax: integration window for BOTTOM pad fractions.
-    //   -1,-1  = full histogram range.
-    //   Binary variables (reco_as_trk, calo_size): signal bin [0,1].
-    //   Continuous variables: physically meaningful signal window.
-    //
-    // NOTE: Beam_KE_end only exists from stage Beam_endZ (05) onwards.
-    //   WARNING messages for stages 01-04 are expected.
-    // ----------------------------------------------------------------
-    std::vector<VarDef> vars = {
-        // suffix           branch                                   xtitle                         compMin compMax
+    // Single global scale used for every (stage, variable) call.
+    double globalScale = ComputeGlobalScale(fMC, fData);
 
-        // binary: comp = signal bin only
+    std::vector<VarDef> vars = {
         {"recoastrk", "Beam_reco_as_trk", "Beam reco. as Track", 0., 1.},
         {"calosize", "Beam_calo_size", "Has calo cluster", 0., 1.},
-
-        // continuous
         {"Pbeam", "Beam_P_beam_inst", "P_{spec.} [MeV/c]", 350., 650.},
         {"endZ", "Beam_endZ", "Z_{end}^{beam} [cm]", 10., 400.},
         {"Z_dir_sign", "Beam_Z_dir_sign", "Z dir. sign", -1., -1.},
@@ -485,8 +507,8 @@ void plot_composition_vs_cuts() {
     };
 
     for (auto& v : vars) {
-        DrawCompositionPlot(fMC, fData, v, /*normalize=*/true, "plots");
-        DrawCompositionPlot(fMC, fData, v, /*normalize=*/false, "plots");
+        DrawCompositionPlot(fMC, fData, v, /*normalize=*/true, globalScale, "plots");
+        DrawCompositionPlot(fMC, fData, v, /*normalize=*/false, globalScale, "plots");
     }
 
     fMC->Close();

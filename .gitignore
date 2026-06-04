@@ -13,6 +13,7 @@ run_pionbeamsel_BKP20260306.C
 hists_*.root
 tar/
 plots/*
+plots*
 *bkp*
 *BKP*
 *OLD*

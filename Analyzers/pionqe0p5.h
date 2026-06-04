@@ -83,22 +83,18 @@ class pionqe0p5 : public AnalyzerCore {
     //==================
     // thin-slice cross-section
     //==================
-    // void FillXsecHistograms(double weight);
-    // double Get_true_tpc_len();
-    // bool IsInelasticSignal_reco();
-    // bool IsInelasticSignal_true();
-
-    // True track length in the TPC, computed from true_beam_traj_Z/endZ
     double Get_true_tpc_len();
 
-    // Returns true if pi_type is a signal inelastic category (reco side)
-    bool IsInelasticSignal_reco();
+    bool IsAbsSignal_reco();
+    bool IsAbsSignal_true();
+    bool IsCexSignal_reco();
+    bool IsCexSignal_true();
+    bool IsOtherSignal_reco();
+    bool IsOtherSignal_true();
+    bool IsInelSignal_reco();
+    bool IsInelSignal_true();
 
-    // Returns true if pi_truetype is a signal inelastic category (true side)
-    bool IsInelasticSignal_true();
-
-    // Main histogram-filling method — call at end of executeEvent() after all cuts
-    void FillXsecHistograms(double weight);
+    void FillXsecHistograms(double weight, int N_loose_charged, int N_loose_neutral);
 
     pionqe0p5();
     ~pionqe0p5();

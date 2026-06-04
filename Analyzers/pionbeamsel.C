@@ -95,82 +95,106 @@ void pionbeamsel::executeEvent() {
     FillBeamPlots("Beam_chi2proton", P_reweight);
 }
 
+// MF20260515:
 void pionbeamsel::FillBeamPlots(TString beam_selec_str, double weight) {
-    double beam_reco_as_trk = -2.;
-    if (evt.reco_beam_type == pandora_slice_pdg)
-        beam_reco_as_trk = 0.5;
-    else
-        beam_reco_as_trk = -0.5;
+    bool has_calo_info = !evt.reco_beam_calo_wire->empty();
+    bool has_KE_end = (KE_end_reco > -900.);  // only set after Beam_endZ cut
 
-    double beam_calo_size = -2.;
-    if (!(evt.reco_beam_calo_wire->empty()))
-        beam_calo_size = 0.5;
-    else
-        beam_calo_size = -0.5;
+    double beam_reco_as_trk = (evt.reco_beam_type == pandora_slice_pdg) ? 0.5 : -0.5;
+    double beam_calo_size = has_calo_info ? 0.5 : -0.5;
 
-    // == Fit results after calo-size cut
-    double Beam_startZ_over_sigma = (evt.reco_beam_calo_startZ - beam_start_z_mu_data) / beam_start_z_sigma_data;
-    double Beam_delta_X_over_sigma = (delta_X_spec_TPC - Beam_delta_X_mu_data) / Beam_delta_X_sigma_data;
-    double Beam_delta_Y_over_sigma = (delta_Y_spec_TPC - Beam_delta_Y_mu_data) / Beam_delta_Y_sigma_data;
-    double Beam_delta_X_at_z10_over_sigma = (delta_x_tpc_spec_at_z - Beam_delta_X_at_z10_mu_data) / Beam_delta_X_at_z10_sigma_data;
-    double Beam_delta_Y_at_z10_over_sigma = (delta_y_tpc_spec_at_z - Beam_delta_Y_at_z10_mu_data) / Beam_delta_Y_at_z10_sigma_data;
+    // -- Derived "over-sigma" quantities (only meaningful with calo info) -----
+    double Beam_startZ_over_sigma = 0.;
+    double Beam_delta_X_over_sigma = 0.;
+    double Beam_delta_Y_over_sigma = 0.;
+    double Beam_delta_X_at_z10_over_sigma = 0.;
+    double Beam_delta_Y_at_z10_over_sigma = 0.;
+    // these quantities should be tuned with the data/MC fit (See paper + SO's latest version of this file)
+    if (has_calo_info) {
+        if (IsData) {
+            Beam_startZ_over_sigma = (evt.reco_beam_calo_startZ - beam_start_z_mu_data) / beam_start_z_sigma_data;
+            Beam_delta_X_over_sigma = (delta_X_spec_TPC - Beam_delta_X_mu_data) / Beam_delta_X_sigma_data;
+            Beam_delta_Y_over_sigma = (delta_Y_spec_TPC - Beam_delta_Y_mu_data) / Beam_delta_Y_sigma_data;
+            Beam_delta_X_at_z10_over_sigma = (delta_x_tpc_spec_at_z - Beam_delta_X_at_z10_mu_data) / Beam_delta_X_at_z10_sigma_data;
+            Beam_delta_Y_at_z10_over_sigma = (delta_y_tpc_spec_at_z - Beam_delta_Y_at_z10_mu_data) / Beam_delta_Y_at_z10_sigma_data;
+        } else {
+            Beam_startZ_over_sigma = (evt.reco_beam_calo_startZ - beam_start_z_mu_mc) / beam_start_z_sigma_mc;
+            Beam_delta_X_over_sigma = (delta_X_spec_TPC - Beam_delta_X_mu_mc) / Beam_delta_X_sigma_mc;
+            Beam_delta_Y_over_sigma = (delta_Y_spec_TPC - Beam_delta_Y_mu_mc) / Beam_delta_Y_sigma_mc;
+            Beam_delta_X_at_z10_over_sigma = (delta_x_tpc_spec_at_z - Beam_delta_X_at_z10_mu_mc) / Beam_delta_X_at_z10_sigma_mc;
+            Beam_delta_Y_at_z10_over_sigma = (delta_y_tpc_spec_at_z - Beam_delta_Y_at_z10_mu_mc) / Beam_delta_Y_at_z10_sigma_mc;
+        }
+    }
+
+    // True-beam plots: depend on MC only, no calo guard needed.
     if (!IsData) {
-        Beam_startZ_over_sigma = (evt.reco_beam_calo_startZ - beam_start_z_mu_mc) / beam_start_z_sigma_mc;
-        Beam_delta_X_over_sigma = (delta_X_spec_TPC - Beam_delta_X_mu_mc) / Beam_delta_X_sigma_mc;
-        Beam_delta_Y_over_sigma = (delta_Y_spec_TPC - Beam_delta_Y_mu_mc) / Beam_delta_Y_sigma_mc;
-        Beam_delta_X_at_z10_over_sigma = (delta_x_tpc_spec_at_z - Beam_delta_X_at_z10_mu_mc) / Beam_delta_X_at_z10_sigma_mc;
-        Beam_delta_Y_at_z10_over_sigma = (delta_y_tpc_spec_at_z - Beam_delta_Y_at_z10_mu_mc) / Beam_delta_Y_at_z10_sigma_mc;
         JSFillHist(beam_selec_str, beam_selec_str + "_true_beam_startP", evt.true_beam_startP * 1000., weight, 2000., 0., 2000.);
         JSFillHist(beam_selec_str, beam_selec_str + "_true_beam_startP_" + pi_type_str, evt.true_beam_startP * 1000., weight, 2000., 0., 2000.);
     }
 
-    double Z_dir_sign = evt.reco_beam_calo_endZ - evt.reco_beam_calo_startZ;
-    if (Z_dir_sign < 0.)
-        Z_dir_sign = -0.5;
-    else
-        Z_dir_sign = 0.5;
-
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startX", evt.reco_beam_calo_startX, weight, 10000., -100., 900.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startY", evt.reco_beam_calo_startY, weight, 10000., -100., 900.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startZ", evt.reco_beam_calo_startZ, weight, 10000., -100., 900.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_endZ", evt.reco_beam_calo_endZ, weight, 1000., -100., 900.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Z_dir_sign", Z_dir_sign, weight, 2., -1., 1.);
+    // ======================================================================
+    // Variables ALWAYS available at this stage (beam instrumentation + truth)
+    // ======================================================================
     JSFillHist(beam_selec_str, beam_selec_str + "_beam_inst_X", evt.beam_inst_X, weight, 10000., -100., 900.);
     JSFillHist(beam_selec_str, beam_selec_str + "_beam_inst_Y", evt.beam_inst_Y, weight, 10000., -100., 900.);
     JSFillHist(beam_selec_str, beam_selec_str + "_Beam_P_beam_inst", P_beam_inst, weight, 2000., 0., 2000.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_costh", beam_costh, weight, 2000., -1., 1.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_chi2_proton", chi2_proton, weight, 10000., 0., 1000.);
 
     JSFillHist(beam_selec_str, beam_selec_str + "_Beam_reco_as_trk_" + pi_type_str, beam_reco_as_trk, weight, 2., -1., 1.);
     JSFillHist(beam_selec_str, beam_selec_str + "_Beam_calo_size_" + pi_type_str, beam_calo_size, weight, 2., -1., 1.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startX_" + pi_type_str, evt.reco_beam_calo_startX, weight, 10000., -100., 900.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startY_" + pi_type_str, evt.reco_beam_calo_startY, weight, 10000., -100., 900.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startZ_" + pi_type_str, evt.reco_beam_calo_startZ, weight, 10000., -100., 900.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_Z_dir_sign_" + pi_type_str, Z_dir_sign, weight, 2., -1., 1.);
     JSFillHist(beam_selec_str, beam_selec_str + "_Beam_inst_X_" + pi_type_str, evt.beam_inst_X, weight, 10000., -100., 900.);
     JSFillHist(beam_selec_str, beam_selec_str + "_Beam_inst_Y_" + pi_type_str, evt.beam_inst_Y, weight, 10000., -100., 900.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_X_spec_TPC_" + pi_type_str, delta_X_spec_TPC, weight, 2000., -100., 100.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_Y_spec_TPC_" + pi_type_str, delta_Y_spec_TPC, weight, 2000., -100., 100.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_x_tpc_spec_at_z_" + pi_type_str, delta_x_tpc_spec_at_z, weight, 2000., -100., 100.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_y_tpc_spec_at_z_" + pi_type_str, delta_y_tpc_spec_at_z, weight, 2000., -100., 100.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_cos_delta_spec_TPC_" + pi_type_str, cos_delta_spec_TPC, weight, 2000., -1., 1.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_cos_spec_tpc_at_z_" + pi_type_str, cos_spec_tpc_at_z, weight, 2000., -1., 1.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_costh_" + pi_type_str, beam_costh, weight, 2000., -1., 1.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_TPC_theta_" + pi_type_str, beam_TPC_theta, weight, 5000., -1., 4.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_TPC_phi_" + pi_type_str, beam_TPC_phi, weight, 8000., -4., 4.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_endZ_" + pi_type_str, evt.reco_beam_calo_endZ, weight, 1100., -100., 1000.);
     JSFillHist(beam_selec_str, beam_selec_str + "_Beam_alt_len_" + pi_type_str, evt.reco_beam_alt_len, weight, 1000., 0., 1000.);
     JSFillHist(beam_selec_str, beam_selec_str + "_Beam_P_beam_inst_" + pi_type_str, P_beam_inst, weight, 2000., 0., 2000.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_chi2_proton_" + pi_type_str, chi2_proton, weight, 10000., 0., 1000.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_trk_len_ratio_" + pi_type_str, trk_len_ratio, weight, 1000., 0, 10.);
+    if (evt.reco_beam_alt_len >= 0.) {
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_trk_len_ratio_" + pi_type_str,
+                   trk_len_ratio, weight, 1000., 0., 10.);
+    }
+    // JSFillHist(beam_selec_str, beam_selec_str + "_Beam_trk_len_ratio_" + pi_type_str, trk_len_ratio, weight, 1000., 0., 10.);
     JSFillHist(beam_selec_str, beam_selec_str + "_Beam_KE_ff_" + pi_type_str, KE_ff_reco, weight, 2000., 0., 2000.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_KE_end_" + pi_type_str, KE_end_reco, weight, 2000., 0., 2000.);
 
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startZ_over_sigma_" + pi_type_str, Beam_startZ_over_sigma, weight, 2000., -10., 10.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_X_spec_TPC_over_sigma_" + pi_type_str, Beam_delta_X_over_sigma, weight, 2000., -10., 10.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_Y_spec_TPC_over_sigma_" + pi_type_str, Beam_delta_Y_over_sigma, weight, 2000., -10., 10.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_X_at_z10_over_sigma_" + pi_type_str, Beam_delta_X_at_z10_over_sigma, weight, 2000., -10., 10.);
-    JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_Y_at_z10_over_sigma_" + pi_type_str, Beam_delta_Y_at_z10_over_sigma, weight, 2000., -10., 10.);
+    // ======================================================================
+    // Variables that REQUIRE calo info (skip if reco_beam_calo_wire is empty)
+    // ======================================================================
+    if (has_calo_info) {
+        double Z_dir_sign = (evt.reco_beam_calo_endZ - evt.reco_beam_calo_startZ < 0.) ? -0.5 : 0.5;
+
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startX", evt.reco_beam_calo_startX, weight, 10000., -100., 900.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startY", evt.reco_beam_calo_startY, weight, 10000., -100., 900.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startZ", evt.reco_beam_calo_startZ, weight, 10000., -100., 900.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_endZ", evt.reco_beam_calo_endZ, weight, 1000., -100., 900.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Z_dir_sign", Z_dir_sign, weight, 2., -1., 1.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_costh", beam_costh, weight, 2000., -1., 1.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_chi2_proton", chi2_proton, weight, 10000., 0., 1000.);
+
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startX_" + pi_type_str, evt.reco_beam_calo_startX, weight, 10000., -100., 900.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startY_" + pi_type_str, evt.reco_beam_calo_startY, weight, 10000., -100., 900.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startZ_" + pi_type_str, evt.reco_beam_calo_startZ, weight, 10000., -100., 900.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_Z_dir_sign_" + pi_type_str, Z_dir_sign, weight, 2., -1., 1.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_X_spec_TPC_" + pi_type_str, delta_X_spec_TPC, weight, 2000., -100., 100.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_Y_spec_TPC_" + pi_type_str, delta_Y_spec_TPC, weight, 2000., -100., 100.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_x_tpc_spec_at_z_" + pi_type_str, delta_x_tpc_spec_at_z, weight, 2000., -100., 100.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_y_tpc_spec_at_z_" + pi_type_str, delta_y_tpc_spec_at_z, weight, 2000., -100., 100.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_cos_delta_spec_TPC_" + pi_type_str, cos_delta_spec_TPC, weight, 2000., -1., 1.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_cos_spec_tpc_at_z_" + pi_type_str, cos_spec_tpc_at_z, weight, 2000., -1., 1.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_costh_" + pi_type_str, beam_costh, weight, 2000., -1., 1.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_TPC_theta_" + pi_type_str, beam_TPC_theta, weight, 5000., -1., 4.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_TPC_phi_" + pi_type_str, beam_TPC_phi, weight, 8000., -4., 4.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_endZ_" + pi_type_str, evt.reco_beam_calo_endZ, weight, 1100., -100., 1000.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_chi2_proton_" + pi_type_str, chi2_proton, weight, 10000., 0., 1000.);
+
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_startZ_over_sigma_" + pi_type_str, Beam_startZ_over_sigma, weight, 2000., -10., 10.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_X_spec_TPC_over_sigma_" + pi_type_str, Beam_delta_X_over_sigma, weight, 2000., -10., 10.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_Y_spec_TPC_over_sigma_" + pi_type_str, Beam_delta_Y_over_sigma, weight, 2000., -10., 10.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_X_at_z10_over_sigma_" + pi_type_str, Beam_delta_X_at_z10_over_sigma, weight, 2000., -10., 10.);
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_delta_Y_at_z10_over_sigma_" + pi_type_str, Beam_delta_Y_at_z10_over_sigma, weight, 2000., -10., 10.);
+    }
+
+    // ======================================================================
+    // Variables that require the Beam_endZ cut to have been passed
+    // ======================================================================
+    if (has_KE_end) {
+        JSFillHist(beam_selec_str, beam_selec_str + "_Beam_KE_end_" + pi_type_str, KE_end_reco, weight, 2000., 0., 2000.);
+    }
 }
 
 void pionbeamsel::MuonKELoss(TString beam_selec_str, double weight) {

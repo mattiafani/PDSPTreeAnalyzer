@@ -5,6 +5,8 @@
 // Output: PDF files in plots/ directory
 // ============================================================
 
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -107,15 +109,6 @@ TH1D* ApplyBinning(TH1D* h, const PlotDef& p, const char* newname) {
     return h;
 }
 
-// ============================================================
-// Fit a single Gaussian to a histogram within kFitRangeSigma
-// sigma of the histogram mean.  Draws the result on the current
-// pad and returns the TF1 (owned by ROOT — do not delete).
-//
-// color    : line color for the fit curve
-// fname    : unique name for the TF1 (must differ per call)
-// Returns nullptr if the fit fails.
-// ============================================================
 TF1* FitAndDrawGaussian(TH1D* h, int color, const char* fname,
                         double xmin, double xmax) {
     // First-pass estimates from histogram moments restricted to
@@ -320,9 +313,75 @@ void DrawPlot(TFile* fMC, TFile* fData,
                dir.Data(), varname.Data());
     }
 
+    // -- Diagnostics: where are the events going?
+    //    Compares (a) the full source-histogram totals, (b) the display-window
+    //    integrals used for normalization and shown on the legend, and (c) the
+    //    tails that get clipped by ApplyBinning's display window.
+    if (DEBUG) {
+        // Re-fetch unbinned copies of the MC histograms so we can see the
+        // *source* totals (pre-ApplyBinning) for comparison.
+        double mc_full = 0., mc_disp = 0., mc_underflow = 0., mc_overflow = 0.;
+        double mc_below_disp = 0., mc_above_disp = 0.;
+        for (int i = 1; i <= NCAT; i++) {
+            TH1D* hSrc = (TH1D*)fMC->Get(dir + "/" + prefix + Form("_%d", i));
+            if (!hSrc) continue;
+            int nb = hSrc->GetNbinsX();
+            int b1_src = (xmax > xmin) ? hSrc->FindBin(xmin) : 1;
+            int b2_src = (xmax > xmin) ? hSrc->FindBin(xmax) - 1 : nb;
+            mc_full += hSrc->Integral(0, nb + 1);  // includes ROOT under/overflow
+            mc_disp += hSrc->Integral(b1_src, b2_src);
+            mc_underflow += hSrc->GetBinContent(0);
+            mc_overflow += hSrc->GetBinContent(nb + 1);
+            if (b1_src > 1) mc_below_disp += hSrc->Integral(1, b1_src - 1);
+            if (b2_src < nb) mc_above_disp += hSrc->Integral(b2_src + 1, nb);
+            delete hSrc;
+        }
+        // Same for data
+        double d_full = 0., d_disp = 0., d_underflow = 0., d_overflow = 0.;
+        double d_below_disp = 0., d_above_disp = 0.;
+        TH1D* hDataSrc = (TH1D*)fData->Get(dir + "/" + prefix);
+        if (!hDataSrc) hDataSrc = (TH1D*)fData->Get(dir + "/" + prefix + "_0");
+        if (hDataSrc) {
+            int nb = hDataSrc->GetNbinsX();
+            int b1_src = (xmax > xmin) ? hDataSrc->FindBin(xmin) : 1;
+            int b2_src = (xmax > xmin) ? hDataSrc->FindBin(xmax) - 1 : nb;
+            d_full = hDataSrc->Integral(0, nb + 1);
+            d_disp = hDataSrc->Integral(b1_src, b2_src);
+            d_underflow = hDataSrc->GetBinContent(0);
+            d_overflow = hDataSrc->GetBinContent(nb + 1);
+            if (b1_src > 1) d_below_disp = hDataSrc->Integral(1, b1_src - 1);
+            if (b2_src < nb) d_above_disp = hDataSrc->Integral(b2_src + 1, nb);
+            delete hDataSrc;
+        }
+
+        printf("\n  [DIAG] %s / %s  (display [%.2f, %.2f])\n",
+               dir.Data(), varname.Data(), xmin, xmax);
+        printf("    %-8s  %10s  %10s  %10s  %10s  %10s  %10s\n",
+               "", "full", "in-disp", "below-disp", "above-disp", "ROOT-uf", "ROOT-of");
+        printf("    %-8s  %10.2f  %10.2f  %10.2f  %10.2f  %10.2f  %10.2f\n",
+               "MC src", mc_full, mc_disp, mc_below_disp, mc_above_disp,
+               mc_underflow, mc_overflow);
+        printf("    %-8s  %10.2f  %10.2f  %10.2f  %10.2f  %10.2f  %10.2f\n",
+               "Data src", d_full, d_disp, d_below_disp, d_above_disp,
+               d_underflow, d_overflow);
+        printf("    rebinned-in-disp:  MC = %.2f   Data = %.2f   (post-ApplyBinning, pre-scale)\n",
+               mcIntegral, dataIntegral);
+        printf("    rebin loss:        MC = %.2f   Data = %.2f   (src in-disp - rebinned in-disp)\n",
+               mc_disp - mcIntegral, d_disp - dataIntegral);
+        printf("    scale applied:     %.4f   %s\n",
+               scale,
+               (!normalize) ? "(raw, no scaling)" : (fixedScale > 0.) ? "(fixedScale from caller)"
+                                                                      : "(per-plot fallback: data/MC in display)");
+    }
+
     for (auto& p : hMC_cat) p.second->Scale(scale);
     hMC_total->Scale(scale);
     double mcSumScaled = hMC_total->Integral();
+
+    if (DEBUG) {
+        printf("    legend will show:  MC sum = %.2f   Data = %.2f   (display-window integrals)\n",
+               mcSumScaled, dataIntegral);
+    }
 
     // -- Axis range
     double axMin = (xmin >= 0) ? xmin : hData->GetXaxis()->GetXmin();
@@ -542,6 +601,197 @@ void DrawPlot(TFile* fMC, TFile* fData,
     delete stack;
 }
 
+// Compute the six-column event count for one histogram or a vector of
+// histograms summed, for MC categories. Returns full / in-disp / below /
+// above / underflow / overflow.
+struct StageCounts {
+    double full = 0., disp = 0., below = 0., above = 0., uf = 0., of = 0.;
+};
+
+static StageCounts AccumCounts(TH1D* h, double xmin, double xmax) {
+    StageCounts c;
+    if (!h) return c;
+    int nb = h->GetNbinsX();
+    int b1 = (xmax > xmin) ? h->FindBin(xmin) : 1;
+    int b2 = (xmax > xmin) ? h->FindBin(xmax) - 1 : nb;
+    c.full = h->Integral(0, nb + 1);
+    c.disp = h->Integral(b1, b2);
+    if (b1 > 1) c.below = h->Integral(1, b1 - 1);
+    if (b2 < nb) c.above = h->Integral(b2 + 1, nb);
+    c.uf = h->GetBinContent(0);
+    c.of = h->GetBinContent(nb + 1);
+    return c;
+}
+
+static bool IsCaloDependent(const TString& var) {
+    static const std::set<TString> calo_vars = {
+        "Beam_endZ", "Beam_chi2_proton", "Beam_costh",
+        "Beam_TPC_theta", "Beam_TPC_phi",
+        "Beam_delta_X_spec_TPC", "Beam_delta_Y_spec_TPC",
+        "Beam_delta_X_spec_TPC_over_sigma", "Beam_delta_Y_spec_TPC_over_sigma",
+        "Beam_delta_x_tpc_spec_at_z", "Beam_delta_y_tpc_spec_at_z",
+        "Beam_delta_X_at_z10_over_sigma", "Beam_delta_Y_at_z10_over_sigma",
+        "Beam_cos_delta_spec_TPC", "Beam_cos_spec_tpc_at_z",
+        "Beam_startX", "Beam_startY", "Beam_startZ",
+        "Beam_startZ_over_sigma", "Beam_Z_dir_sign"};
+    return calo_vars.count(var) > 0;
+}
+
+// Variables that are only filled after the Beam_endZ cut.
+static bool IsEndZDependent(const TString& var) {
+    return (var == "Beam_KE_end");
+}
+
+void PrintCutflow(TFile* fMC, TFile* fData, const vector<PlotDef>& plots) {
+    const int NCAT = 13;
+
+    auto fetchCounts = [&](const TString& dir, const TString& var,
+                           double xmin, double xmax,
+                           StageCounts& mc, StageCounts& data,
+                           TString& missing) {
+        mc = StageCounts();
+        data = StageCounts();
+        missing = "";
+        TString prefix = dir + "_" + var;
+        for (int i = 1; i <= NCAT; i++) {
+            TH1D* h = (TH1D*)fMC->Get(dir + "/" + prefix + Form("_%d", i));
+            if (!h) {
+                missing += Form("%d ", i);
+                continue;
+            }
+            StageCounts c = AccumCounts(h, xmin, xmax);
+            mc.full += c.full;
+            mc.disp += c.disp;
+            mc.below += c.below;
+            mc.above += c.above;
+            mc.uf += c.uf;
+            mc.of += c.of;
+        }
+        TH1D* hD = (TH1D*)fData->Get(dir + "/" + prefix);
+        if (!hD) hD = (TH1D*)fData->Get(dir + "/" + prefix + "_0");
+        data = AccumCounts(hD, xmin, xmax);
+    };
+
+    auto printLine = [](const TString& var, double xmin, double xmax,
+                        const StageCounts& mc, const StageCounts& data,
+                        const TString& missing) {
+        TString winStr = Form("[%.1f, %.1f]", xmin, xmax);
+        TString varStr = Form("%s %s", var.Data(), winStr.Data());
+        printf("  %-38s | %7.1f /%7.1f /%6.1f /%6.1f /%4.0f /%4.0f | %7.1f /%7.1f /%6.1f /%6.1f /%4.0f /%4.0f",
+               varStr.Data(),
+               mc.full, mc.disp, mc.below, mc.above, mc.uf, mc.of,
+               data.full, data.disp, data.below, data.above, data.uf, data.of);
+        if (missing.Length()) printf("  [missing MC cats: %s]", missing.Data());
+        printf("\n");
+    };
+
+    // Group plots by stage, preserving stage order from the PlotDef list.
+    vector<TString> stageOrder;
+    map<TString, vector<const PlotDef*>> stageVars;
+    for (auto& p : plots) {
+        if (stageVars.find(p.dir) == stageVars.end()) stageOrder.push_back(p.dir);
+        stageVars[p.dir].push_back(&p);
+    }
+
+    double scraper_mc_full = -1.;
+    double scraper_data_full = -1.;
+    double mc_to_data_scale = 1.;
+
+    for (const TString& stage : stageOrder) {
+        printf("\n=== %s ===\n", stage.Data());
+        printf("  %-38s | %-50s | %-50s\n",
+               "variable [display window]",
+               "MC: full / in-disp / below / above / uf / of",
+               "Data: full / in-disp / below / above / uf / of");
+
+        // Partition variables by dependency group, preserving original order.
+        vector<const PlotDef*> always_grp, calo_grp, endZ_grp;
+        for (const PlotDef* p : stageVars[stage]) {
+            if (IsEndZDependent(p->var))
+                endZ_grp.push_back(p);
+            else if (IsCaloDependent(p->var))
+                calo_grp.push_back(p);
+            else
+                always_grp.push_back(p);
+        }
+
+        // Per-stage reference numbers for the summary line:
+        StageCounts pbeam_mc, pbeam_data;  // stage total
+        StageCounts calo_mc, calo_data;    // calo subset
+        TString calo_ref_var = "";         // name of the calo-ref variable
+        bool have_calo_ref = false;
+
+        auto runGroup = [&](const char* label, const vector<const PlotDef*>& grp) {
+            if (grp.empty()) return;
+            printf("  --- %s ---\n", label);
+            for (const PlotDef* p : grp) {
+                StageCounts mc, data;
+                TString missing;
+                fetchCounts(p->dir, p->var, p->xmin, p->xmax, mc, data, missing);
+                printLine(p->var, p->xmin, p->xmax, mc, data, missing);
+
+                if (p->var == "Beam_P_beam_inst") {
+                    pbeam_mc = mc;
+                    pbeam_data = data;
+                }
+                if (!have_calo_ref && IsCaloDependent(p->var) && mc.full > 0) {
+                    calo_mc = mc;
+                    calo_data = data;
+                    calo_ref_var = p->var;
+                    have_calo_ref = true;
+                }
+            }
+        };
+
+        runGroup("always defined", always_grp);
+        runGroup("requires calo info", calo_grp);
+        runGroup("requires Beam_endZ cut", endZ_grp);
+
+        // Capture scraper-stage totals the first time we see them.
+        if (stage == "Beam_scraper" &&
+            pbeam_mc.full > 0 && pbeam_data.full > 0) {
+            scraper_mc_full = pbeam_mc.full;
+            scraper_data_full = pbeam_data.full;
+            mc_to_data_scale = scraper_data_full / scraper_mc_full;
+        }
+
+        // ---- Per-stage summary -------------------------------------------
+        printf("  --- summary ---\n");
+        if (pbeam_mc.full > 0 || pbeam_data.full > 0) {
+            printf("  stage total (Beam_P_beam_inst):    MC = %7.1f   Data = %7.1f\n",
+                   pbeam_mc.full, pbeam_data.full);
+        } else {
+            printf("  stage total: Beam_P_beam_inst not found in this stage\n");
+        }
+        if (have_calo_ref) {
+            double mc_caloless = pbeam_mc.full - calo_mc.full;
+            double data_caloless = pbeam_data.full - calo_data.full;
+            printf(
+                "  calo-info subset (%s): MC = %7.1f   Data = %7.1f"
+                "   (no-calo: MC = %.1f, Data = %.1f)\n",
+                calo_ref_var.Data(), calo_mc.full, calo_data.full,
+                mc_caloless, data_caloless);
+        }
+
+        if (scraper_mc_full > 0 && scraper_data_full > 0 &&
+            pbeam_mc.full > 0 && pbeam_data.full > 0) {
+            double eff_mc = 100. * pbeam_mc.full / scraper_mc_full;
+            double eff_data = 100. * pbeam_data.full / scraper_data_full;
+            printf("  efficiency vs Beam_scraper:        MC = %6.2f%%   Data = %6.2f%%\n",
+                   eff_mc, eff_data);
+        }
+
+        if (mc_to_data_scale != 1. && pbeam_mc.full > 0) {
+            double mc_scaled = pbeam_mc.full * mc_to_data_scale;
+            printf(
+                "  scaled to plot legend (scale=%.4f): MC = %7.1f   Data = %7.1f"
+                "   (data/MC = %.3f)\n",
+                mc_to_data_scale, mc_scaled, pbeam_data.full,
+                (mc_scaled > 0 ? pbeam_data.full / mc_scaled : 0.));
+        }
+    }
+}
+
 // ============================================================
 // Main
 // ============================================================
@@ -680,6 +930,8 @@ void plot_beamsel() {
         DrawPlot(fMC, fData, p.dir, p.var, p.xtitle, p.outname,
                  p.xmin, p.xmax, &p, /*normalize=*/false, 1.0, "plots", fOut);
     }
+
+    PrintCutflow(fMC, fData, plots);
 
     fMC->Close();
     fData->Close();
