@@ -150,34 +150,47 @@ vector<SliceKE> GetKEPerSliceSummed(TFile* f, TString dir, TString prefix,
     return out;
 }
 
-TGraphErrors* ComputeXsec(TH1D* h_inc, TH1D* h_int,
-                          TH1D* h_eff = nullptr,
-                          const vector<SliceKE>* ke_map = nullptr,
-                          TString label = "") {
+// ============================================================
+// Thin-slice cross-section as a TH1D keyed by slice-ID bin
+// (same binning as the input N_inc/N_int histograms).
+// sigma(slice) = xsec_norm * -ln(1 - N_int/N_inc)
+// ============================================================
+TH1D* XsecHist(TH1D* h_inc, TH1D* h_int, TString name) {
     if (!h_inc || !h_int) return nullptr;
-    vector<double> x, y, ex, ey;
+    TH1D* h = (TH1D*)h_inc->Clone(name);
+    h->SetDirectory(0);
+    h->Reset();
     for (int b = 1; b <= h_inc->GetNbinsX(); b++) {
-        double sliceID = h_inc->GetBinCenter(b);
-        if (sliceID < 0 || sliceID >= n_slices) continue;
         double N_inc = h_inc->GetBinContent(b);
         double N_int = h_int->GetBinContent(b);
         if (N_inc <= 0.) continue;
         if (N_int < 0.) N_int = 0.;
         if (N_int > N_inc) N_int = N_inc;
-        double eff = 1.;
-        if (h_eff) {
-            eff = h_eff->GetBinContent(b);
-            if (eff <= 0.) continue;
-        }
-        double ratio = N_int / (N_inc * eff);
+        double ratio = N_int / N_inc;
         if (ratio >= 1.) ratio = 1. - 1.e-6;
         double sigma = xsec_norm * (-TMath::Log(1. - ratio));
         double d_ratio = (N_int > 0.) ? ratio * TMath::Sqrt(1. / N_int + 1. / N_inc) : 1. / N_inc;
         double d_sigma = xsec_norm * d_ratio / (1. - ratio);
+        h->SetBinContent(b, sigma);
+        h->SetBinError(b, d_sigma);
+    }
+    return h;
+}
+
+// Convert a per-slice cross-section TH1D to a TGraphErrors, placing each
+// point at the KE recorded for that slice in ke_map.
+TGraphErrors* HistToGraph(TH1D* h, const vector<SliceKE>* ke_map, TString name) {
+    if (!h) return nullptr;
+    vector<double> x, y, ex, ey;
+    for (int b = 1; b <= h->GetNbinsX(); b++) {
+        double sigma = h->GetBinContent(b);
+        if (sigma <= 0.) continue;
+        int sliceID = (int)h->GetBinCenter(b);
+        if (sliceID < 0 || sliceID >= n_slices) continue;
         double xval = sliceID, exval = 0.5;
         if (ke_map) {
             for (const auto& sk : *ke_map)
-                if (sk.id == (int)sliceID) {
+                if (sk.id == sliceID) {
                     xval = sk.ke;
                     exval = sk.ke_err;
                     break;
@@ -186,11 +199,11 @@ TGraphErrors* ComputeXsec(TH1D* h_inc, TH1D* h_int,
         x.push_back(xval);
         y.push_back(sigma);
         ex.push_back(exval);
-        ey.push_back(d_sigma);
+        ey.push_back(h->GetBinError(b));
     }
     if (x.empty()) return nullptr;
     TGraphErrors* g = new TGraphErrors(x.size(), x.data(), y.data(), ex.data(), ey.data());
-    g->SetName("g_xsec_" + label);
+    g->SetName(name);
     return g;
 }
 
@@ -418,14 +431,13 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
     printf("  Output directory: %s\n", plotdir.Data());
     printf("========================================================\n");
 
+    // MC-only stage: data is intentionally not loaded. We first establish that
+    // the thin-slice extraction reproduces the Geant4 input from MC truth, and
+    // we quantify the reco-level detector effect. Data returns once the fit
+    // (which handles efficiency/smearing properly) is in place.
     TFile* fMC = TFile::Open("hists_MC_0.5GeV_pionqe0p5.root");
-    TFile* fData = TFile::Open("hists_Data_0.5GeV_pionqe0p5.root");
     if (!fMC || fMC->IsZombie()) {
         printf("ERROR: cannot open MC file\n");
-        return nullptr;
-    }
-    if (!fData || fData->IsZombie()) {
-        printf("ERROR: cannot open Data file\n");
         return nullptr;
     }
 
@@ -433,10 +445,6 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
                                    ? "Xsec_purity_all"
                                    : Form("Xsec_purity_all_%s", signal_tag.Data());
 
-    TH1D* h_inc_data = GetH1(fData, "Xsec", "Xsec_N_inc_reco_0");
-
-    TH1D* h_int_data = GetH1(fData, "Xsec",
-                             Form("Xsec_N_int_reco_%s_0", signal_tag.Data()));
     TH1D* h_inc_mc_reco = SumCats(fMC, "Xsec", "Xsec_N_inc_reco");
     TH1D* h_int_mc_reco = SumCats(fMC, "Xsec",
                                   Form("Xsec_N_int_reco_%s", signal_tag.Data()));
@@ -475,32 +483,18 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         h_purity->Divide(h_pur_all);
     }
 
-    // -- Apply purity to data; efficiency comes from Stage A.
-    TH1D* h_inc_data_pur = nullptr;
-    TH1D* h_int_data_pur = nullptr;
-    if (h_inc_data && h_purity) {
-        h_inc_data_pur = (TH1D*)h_inc_data->Clone("h_inc_data_pur");
-        h_inc_data_pur->SetDirectory(0);
-        h_inc_data_pur->Multiply(h_purity);
-        h_int_data_pur = (TH1D*)h_int_data->Clone("h_int_data_pur");
-        h_int_data_pur->SetDirectory(0);
-        h_int_data_pur->Multiply(h_purity);
-    }
+    // -- Thin-slice cross sections from MC:
+    //      sigma_MC,true : from truth N_inc/N_int -> must reproduce the Geant4
+    //                      input curve. This is the closure test of the method.
+    //      sigma_MC,reco : from reco  N_inc/N_int -> shows the size of the
+    //                      detector effect (efficiency + slice migration + pool
+    //                      leakage) that the forward fit will have to absorb.
+    TH1D* hx_mc_true = XsecHist(h_inc_mc_true, h_int_mc_true, "hx_mc_true");
+    TH1D* hx_mc_reco = XsecHist(h_inc_mc_reco, h_int_mc_reco, "hx_mc_reco");
 
-    // // -- Cross-section graphs
-    // TGraphErrors* g_xsec_mc_reco =
-    //     ComputeXsec(h_inc_mc_reco, h_int_mc_reco, nullptr, &ke_reco, "mc_reco_raw");
-    // TGraphErrors* g_xsec_data_pur =
-    //     ComputeXsec(h_inc_data_pur, h_int_data_pur, nullptr, &ke_reco, "data_purity");
-    // TGraphErrors* g_xsec_data_corr =
-    //     ComputeXsec(h_inc_data_pur, h_int_data_pur, h_eff_in, &ke_reco, "data_corr");
-
-    TGraphErrors* g_xsec_mc_reco =
-        ComputeXsec(h_inc_mc_reco, h_int_mc_reco, nullptr, &ke_true_channel, "mc_reco_raw");
-    TGraphErrors* g_xsec_data_pur =
-        ComputeXsec(h_inc_data_pur, h_int_data_pur, nullptr, &ke_true_channel, "data_purity");
-    TGraphErrors* g_xsec_data_corr =
-        ComputeXsec(h_inc_data_pur, h_int_data_pur, h_eff_in, &ke_true_channel, "data_corr");
+    // -- Graphs: true sigma at the true-KE map, reco sigma at the reco-KE map.
+    TGraphErrors* g_xsec_mc_true = HistToGraph(hx_mc_true, &ke_true_channel, "g_xsec_mc_true");
+    TGraphErrors* g_xsec_mc_reco = HistToGraph(hx_mc_reco, &ke_reco, "g_xsec_mc_reco");
 
     // -- Geant4 reference curve
     TGraph* g_g4 = LoadG4Xsec(g4_histname);
@@ -514,42 +508,40 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
     // Plot 1: N_inc and N_int composition
     // ============================================================
     {
-        auto drawCounts = [&](TPad* pad, TH1D* hmc, TH1D* hdata,
+        auto drawCounts = [&](TPad* pad, TH1D* hreco, TH1D* htrue,
                               TString xtitle, TString ytitle,
                               std::vector<TObject*>& owned) {
-            if (!pad || !hmc || !hdata) return;
+            if (!pad || !hreco || !htrue) return;
             pad->cd();
             pad->SetLeftMargin(0.14);
             pad->SetBottomMargin(0.14);
 
-            double scale = hdata->Integral() > 0 ? hdata->Integral() / hmc->Integral() : 1.;
-            TH1D* hs = (TH1D*)hmc->Clone();
-            hs->SetDirectory(0);
-            hs->Scale(scale);
-            owned.push_back(hs);
+            double ymax = std::max(hreco->GetMaximum(), htrue->GetMaximum()) * 1.45;
+            TH1D* hr = (TH1D*)hreco->Clone();
+            hr->SetDirectory(0);
+            owned.push_back(hr);
+            hr->SetFillColor(kCyan + 1);
+            hr->SetLineColor(kCyan + 3);
+            hr->SetFillStyle(1001);
+            hr->GetXaxis()->SetTitle(xtitle);
+            hr->GetYaxis()->SetTitle(ytitle);
+            hr->GetYaxis()->SetTitleOffset(1.3);
+            hr->SetMaximum(ymax);
+            hr->SetMinimum(0.);
+            hr->GetXaxis()->SetRangeUser(-0.5, 35.5);
+            hr->Draw("HIST");
 
-            double ymax = std::max(hs->GetMaximum(), hdata->GetMaximum()) * 1.45;
-            hs->SetFillColor(kCyan + 1);
-            hs->SetLineColor(kCyan + 3);
-            hs->SetFillStyle(1001);
-            hs->GetXaxis()->SetTitle(xtitle);
-            hs->GetYaxis()->SetTitle(ytitle);
-            hs->GetYaxis()->SetTitleOffset(1.3);
-            hs->SetMaximum(ymax);
-            hs->SetMinimum(0.);
-            hs->GetXaxis()->SetRangeUser(-0.5, 35.5);
-            hs->Draw("HIST");
-
-            hdata->SetMarkerStyle(20);
-            hdata->SetMarkerSize(0.8);
-            hdata->SetLineColor(kBlack);
-            hdata->SetMarkerColor(kBlack);
-            hdata->Draw("E1 SAME");
+            TH1D* ht = (TH1D*)htrue->Clone();
+            ht->SetDirectory(0);
+            owned.push_back(ht);
+            ht->SetLineColor(kBlack);
+            ht->SetLineWidth(2);
+            ht->Draw("HIST SAME");
 
             TLegend* leg = new TLegend(0.52, 0.72, 0.88, 0.86);
             owned.push_back(leg);
-            leg->AddEntry(hs, "MC reco (norm.)", "f");
-            leg->AddEntry(hdata, "Data", "lep");
+            leg->AddEntry(hr, "MC reco", "f");
+            leg->AddEntry(ht, "MC true", "l");
             leg->SetBorderSize(0);
             leg->SetFillStyle(0);
             leg->SetTextSize(0.038);
@@ -561,12 +553,12 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         c->Divide(2, 1, 0.005, 0.01);
         std::vector<TObject*> owned;
         drawCounts((TPad*)c->GetPad(1),
-                   h_inc_mc_reco, h_inc_data,
-                   "Reco Slice ID", "Events (N_{inc})",
+                   h_inc_mc_reco, h_inc_mc_true,
+                   "Slice ID", "Events (N_{inc})",
                    owned);
         drawCounts((TPad*)c->GetPad(2),
-                   h_int_mc_reco, h_int_data,
-                   "Reco Slice ID", "Events (N_{int})",
+                   h_int_mc_reco, h_int_mc_true,
+                   "Slice ID", "Events (N_{int})",
                    owned);
         c->Update();
         SaveCanvas(c, "xsec_Ninc_Nint_reco", plotdir);
@@ -638,9 +630,9 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
     }
 
     // ============================================================
-    // Plot 4: Cross-section with data/Geant4 ratio pad
-    //   Top pad: σ(KE) — smooth Geant4 line + MC reco + data points
-    //   Bottom pad: data_corr / Geant4 ratio
+    // Plot 4: Cross-section with MC/Geant4 ratio pad
+    //   Top pad: Geant4 input line + MC truth (closure) + MC reco
+    //   Bottom pad: MC/Geant4 ratios (truth ~1 = method closes)
     // ============================================================
     {
         TCanvas* c = new TCanvas("c_xsec", "", 800, 800);
@@ -658,25 +650,20 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         // ---- TOP PAD ----
         p1->cd();
 
+        if (g_xsec_mc_true) {
+            g_xsec_mc_true->SetMarkerStyle(20);
+            g_xsec_mc_true->SetMarkerSize(1.0);
+            g_xsec_mc_true->SetLineColor(kBlack);
+            g_xsec_mc_true->SetMarkerColor(kBlack);
+            g_xsec_mc_true->SetLineWidth(2);
+        }
         if (g_xsec_mc_reco) {
+            g_xsec_mc_reco->SetMarkerStyle(24);
+            g_xsec_mc_reco->SetMarkerSize(1.0);
             g_xsec_mc_reco->SetLineColor(kGreen + 2);
+            g_xsec_mc_reco->SetMarkerColor(kGreen + 2);
             g_xsec_mc_reco->SetLineWidth(2);
             g_xsec_mc_reco->SetLineStyle(2);
-            g_xsec_mc_reco->SetMarkerStyle(20);
-            g_xsec_mc_reco->SetMarkerSize(0.8);
-            g_xsec_mc_reco->SetMarkerColor(kGreen + 2);
-        }
-        if (g_xsec_data_pur) {
-            g_xsec_data_pur->SetMarkerStyle(24);
-            g_xsec_data_pur->SetMarkerSize(1.0);
-            g_xsec_data_pur->SetLineColor(kGray + 1);
-            g_xsec_data_pur->SetMarkerColor(kGray + 1);
-        }
-        if (g_xsec_data_corr) {
-            g_xsec_data_corr->SetMarkerStyle(20);
-            g_xsec_data_corr->SetMarkerSize(1.1);
-            g_xsec_data_corr->SetLineColor(kBlack);
-            g_xsec_data_corr->SetLineWidth(2);
         }
 
         TH1D* hf = new TH1D("hf_top", "", 100, 0., 400.);
@@ -691,29 +678,27 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         hf->Draw("AXIS");
 
         if (g_g4) g_g4->Draw("L SAME");
-        if (g_xsec_mc_reco) g_xsec_mc_reco->Draw("P SAME");
-        if (g_xsec_data_pur) g_xsec_data_pur->Draw("PZ SAME");
-        if (g_xsec_data_corr) g_xsec_data_corr->Draw("PZ SAME");
+        if (g_xsec_mc_reco) g_xsec_mc_reco->Draw("PZ SAME");
+        if (g_xsec_mc_true) g_xsec_mc_true->Draw("PZ SAME");
 
-        TLegend* leg = new TLegend(0.48, 0.62, 0.92, 0.88);
+        TLegend* leg = new TLegend(0.45, 0.66, 0.92, 0.88);
         leg->SetBorderSize(0);
         leg->SetFillStyle(0);
-        leg->SetTextSize(0.038);
-        if (g_g4) leg->AddEntry(g_g4, "Geant4 (Bertini)", "l");
-        if (g_xsec_mc_reco) leg->AddEntry(g_xsec_mc_reco, "MC reco (no correction)", "lp");
-        if (g_xsec_data_pur) leg->AddEntry(g_xsec_data_pur, "Data (purity corr.)", "p");
-        if (g_xsec_data_corr) leg->AddEntry(g_xsec_data_corr, "Data (purity+eff corr.)", "p");
+        leg->SetTextSize(0.036);
+        if (g_g4) leg->AddEntry(g_g4, "Geant4 (Bertini) input", "l");
+        if (g_xsec_mc_true) leg->AddEntry(g_xsec_mc_true, "MC truth (thin-slice closure)", "lp");
+        if (g_xsec_mc_reco) leg->AddEntry(g_xsec_mc_reco, "MC reco (uncorrected)", "lp");
         leg->Draw();
         DrawLabels(Form("%s, t = %.0f cm slices", sig_long.Data(), slice_thickness_cm));
 
-        // ---- BOTTOM PAD: data_corr / Geant4 ratio ----
+        // ---- BOTTOM PAD: MC / Geant4 ratios ----
         p2->cd();
         TH1D* hf_bot = new TH1D("hf_bot", "", 100, 0., 400.);
         hf_bot->SetDirectory(0);
         hf_bot->GetXaxis()->SetTitle("#pi^{+} Kinetic Energy [MeV]");
         hf_bot->GetXaxis()->SetTitleSize(0.11);
         hf_bot->GetXaxis()->SetLabelSize(0.10);
-        hf_bot->GetYaxis()->SetTitle("Data / Geant4");
+        hf_bot->GetYaxis()->SetTitle("MC / Geant4");
         hf_bot->GetYaxis()->SetTitleSize(0.10);
         hf_bot->GetYaxis()->SetTitleOffset(0.50);
         hf_bot->GetYaxis()->SetLabelSize(0.09);
@@ -721,37 +706,47 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         hf_bot->GetYaxis()->SetRangeUser(0., 2.5);
         hf_bot->Draw("AXIS");
 
-        TGraphErrors* gr_ratio = nullptr;
-        if (g_xsec_data_corr && g_g4) {
+        auto makeRatio = [&](TGraphErrors* g, int color, int mstyle) -> TGraphErrors* {
+            if (!g || !g_g4) return nullptr;
             vector<double> xr, yr, exr, eyr;
-            int n_data = g_xsec_data_corr->GetN();
-            printf("\n=== Cross-section + ratio summary (%s) ===\n", signal_tag.Data());
-            printf("%-6s  %-10s  %-12s  %-12s  %s\n",
-                   "i", "KE[MeV]", "s_data[mb]", "s_G4[mb]", "ratio");
-            for (int i = 0; i < n_data; i++) {
+            for (int i = 0; i < g->GetN(); i++) {
                 double xd, yd;
-                g_xsec_data_corr->GetPoint(i, xd, yd);
+                g->GetPoint(i, xd, yd);
                 if (yd <= 0.) continue;
                 double yg = g_g4->Eval(xd);
                 if (yg <= 0.) continue;
-                double r = yd / yg;
-                double er = g_xsec_data_corr->GetErrorY(i) / yg;
                 xr.push_back(xd);
-                yr.push_back(r);
+                yr.push_back(yd / yg);
                 exr.push_back(0.);
-                eyr.push_back(er);
-                printf("%-6d  %-10.1f  %-12.1f  %-12.1f  %.3f +/- %.3f\n",
-                       i, xd, yd, yg, r, er);
+                eyr.push_back(g->GetErrorY(i) / yg);
             }
-            if (!xr.empty()) {
-                gr_ratio = new TGraphErrors(xr.size(), xr.data(), yr.data(),
-                                            exr.data(), eyr.data());
-                gr_ratio->SetMarkerStyle(20);
-                gr_ratio->SetMarkerSize(1.0);
-                gr_ratio->SetLineColor(kBlack);
-                gr_ratio->Draw("PZ SAME");
+            if (xr.empty()) return nullptr;
+            TGraphErrors* gr = new TGraphErrors(xr.size(), xr.data(), yr.data(),
+                                                exr.data(), eyr.data());
+            gr->SetMarkerStyle(mstyle);
+            gr->SetMarkerSize(1.0);
+            gr->SetLineColor(color);
+            gr->SetMarkerColor(color);
+            gr->Draw("PZ SAME");
+            return gr;
+        };
+
+        printf("\n=== MC closure summary (%s): sigma_true/G4 should be ~1 ===\n",
+               signal_tag.Data());
+        if (g_xsec_mc_true && g_g4) {
+            for (int i = 0; i < g_xsec_mc_true->GetN(); i++) {
+                double xd, yd;
+                g_xsec_mc_true->GetPoint(i, xd, yd);
+                if (yd <= 0.) continue;
+                double yg = g_g4->Eval(xd);
+                if (yg <= 0.) continue;
+                printf("  KE=%-7.1f  s_true=%-8.1f  s_G4=%-8.1f  ratio=%.3f\n",
+                       xd, yd, yg, yd / yg);
             }
         }
+
+        TGraphErrors* gr_true = makeRatio(g_xsec_mc_true, kBlack, 20);
+        TGraphErrors* gr_reco = makeRatio(g_xsec_mc_reco, kGreen + 2, 24);
 
         TLine* lref = new TLine(0., 1., 400., 1.);
         lref->SetLineStyle(2);
@@ -765,7 +760,8 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
                    plotdir);
         delete hf;
         delete hf_bot;
-        delete gr_ratio;
+        delete gr_true;
+        delete gr_reco;
         delete lref;
         delete leg;
         delete p1;
@@ -832,11 +828,10 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         delete c;
     }
 
-    TGraphErrors* g_return = g_xsec_data_corr ? (TGraphErrors*)g_xsec_data_corr->Clone(Form("g_return_%s", signal_tag.Data())) : nullptr;
+    // Return the truth-level cross section (used by the sum-check in plot_xsec).
+    TGraphErrors* g_return = g_xsec_mc_true ? (TGraphErrors*)g_xsec_mc_true->Clone(Form("g_return_%s", signal_tag.Data())) : nullptr;
 
     // -- Cleanup
-    delete h_inc_data;
-    delete h_int_data;
     delete h_inc_mc_reco;
     delete h_int_mc_reco;
     delete h_inc_mc_true;
@@ -844,16 +839,14 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
     delete h_pur_all;
     delete h_pur_sig;
     delete h_purity;
-    delete h_inc_data_pur;
-    delete h_int_data_pur;
+    delete hx_mc_true;
+    delete hx_mc_reco;
     delete h_migration;
+    delete g_xsec_mc_true;
     delete g_xsec_mc_reco;
-    delete g_xsec_data_pur;
-    delete g_xsec_data_corr;
     delete g_g4;
 
     fMC->Close();
-    fData->Close();
     printf("\nDone with %s. Plots saved in %s/\n", signal_tag.Data(), plotdir.Data());
 
     return g_return;
