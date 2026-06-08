@@ -1,8 +1,8 @@
 #include "TLorentzVector.h"
 #include "pionqe0p5.h"
 
-static const double kSliceThickness = 5.;  // 10.;  // cm
-static const int kNSlices = 50;
+static const double kSliceThickness = 2.5; //5.;  // 10.;  // cm
+static const int kNSlices = 100; //50;
 
 void pionqe0p5::initializeAnalyzer() {
     cout << "[[PionAnalyzer::initializeAnalyzer]] Beam Momentum : " << Beam_Momentum << endl;
