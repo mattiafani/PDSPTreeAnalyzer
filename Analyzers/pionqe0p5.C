@@ -315,21 +315,17 @@ std::vector<Daughter> pionqe0p5::SelectLooseNeutralPions(const vector<Daughter>&
 }
 
 double pionqe0p5::Get_true_tpc_len() {
+    // 3D trajectory path length from the TPC front face (Z = 0) to the end point 
+    // The previous version simply used the Z-projection (true_beam_endZ - z_ff), 
+    // without considering the angle. Okay it's small, but it's not zero
+    // so it underestimated the argon path by ~1/cos(theta) and biased the truth
+    // thin-slice cross section high, growing with depth as the track scatters.
+
     if (IsData) return -1.;
     if (!evt.true_beam_traj_Z || evt.true_beam_traj_Z->empty()) return -1.;
+ 
 
-    // Find the first traj point at or past Z = 0 (TPC front face)
-    double z_ff = -1.;
-    for (int i = 0; i < (int)evt.true_beam_traj_Z->size(); i++) {
-        if (evt.true_beam_traj_Z->at(i) >= 0.) {
-            z_ff = 0.;
-            break;
-        }
-    }
-    if (z_ff < 0.) return -1.;
-    double z_end = evt.true_beam_endZ;
-    if (z_end < 0.) return -1.;
-    double true_len = z_end - z_ff;
+    double true_len = Get_true_beamlen();  // accumulated 3D length from Z = 0
     if (true_len < 0.) return -1.;
     return true_len;
 }
