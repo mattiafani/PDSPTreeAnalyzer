@@ -19,6 +19,12 @@
 const double slice_thickness_cm = 5.;
 const int n_slices = 50;
 
+// KE window (MeV) over which the truth-vs-Bertini closure is quantified.
+// Trim edge slices (very high KE near entry, very low KE near stopping) where
+// statistics are poor; widen/narrow as the sample warrants.
+const double kCloseKEmin = 50.;
+const double kCloseKEmax = 300.;
+
 const double LAr_rho = 1.3954;
 const double LAr_A = 39.948;
 const double Avogadro = 6.02214e23;
@@ -205,6 +211,48 @@ TGraphErrors* HistToGraph(TH1D* h, const vector<SliceKE>* ke_map, TString name) 
     TGraphErrors* g = new TGraphErrors(x.size(), x.data(), y.data(), ex.data(), ey.data());
     g->SetName(name);
     return g;
+}
+
+// ============================================================
+// Truth-vs-Bertini closure metric over a KE window.
+//   chi2/N : sum of (sigma_true - sigma_G4)^2 / err^2 divided by N points
+//   ratio  : stat-weighted mean of sigma_true/sigma_G4 with its error
+// CAVEAT: this is not a rigorous goodness-of-fit. 
+// The individual point errors are approximate as N_inc and
+// N_int treated as independent; neighbouring slices are correlated through
+// the cumulative N_inc.  
+// A covariance-based version is the proper way.
+// ============================================================
+struct Closure {
+    int n = 0;
+    double chi2N = 0., ratio = 0., ratio_err = 0.;
+};
+
+Closure ComputeClosure(TGraphErrors* g, TGraph* g4,
+                       double kemin, double kemax) {
+    Closure c;
+    if (!g || !g4) return c;
+    double chi2 = 0., sumw = 0., sumwr = 0.;
+    for (int i = 0; i < g->GetN(); i++) {
+        double x, y;
+        g->GetPoint(i, x, y);
+        if (x < kemin || x > kemax || y <= 0.) continue;
+        double yg = g4->Eval(x);
+        if (yg <= 0.) continue;
+        double ey = g->GetErrorY(i);
+        if (ey <= 0.) continue;
+        chi2 += (y - yg) * (y - yg) / (ey * ey);
+        double r = y / yg, er = ey / yg, w = 1. / (er * er);
+        sumw += w;
+        sumwr += w * r;
+        c.n++;
+    }
+    if (c.n > 0) {
+        c.chi2N = chi2 / c.n;
+        c.ratio = sumwr / sumw;
+        c.ratio_err = 1. / TMath::Sqrt(sumw);
+    }
+    return c;
 }
 
 void DrawLabels(TString extra = "") {
@@ -504,6 +552,15 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         g_g4->SetMarkerSize(0);
     }
 
+    // -- Truth-vs-Bertini closure (the headline MC validation).
+    Closure clo = ComputeClosure(g_xsec_mc_true, g_g4, kCloseKEmin, kCloseKEmax);
+    printf("\n[CLOSURE %s] KE[%.0f,%.0f] MeV: N=%d  chi2/N=%.2f  "
+           "<sigma_true/G4>=%.3f +/- %.3f\n",
+           signal_tag.Data(), kCloseKEmin, kCloseKEmax, clo.n,
+           clo.chi2N, clo.ratio, clo.ratio_err);
+    printf("    (indicative only: per-point errors are approximate and slices "
+           "are correlated via the cumulative N_inc)\n");
+
     // ============================================================
     // Plot 1: N_inc and N_int composition
     // ============================================================
@@ -690,6 +747,19 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         if (g_xsec_mc_reco) leg->AddEntry(g_xsec_mc_reco, "MC reco (uncorrected)", "lp");
         leg->Draw();
         DrawLabels(Form("%s, t = %.0f cm slices", sig_long.Data(), slice_thickness_cm));
+
+        // -- Stamp the closure result on the plot.
+        if (clo.n > 0) {
+            TLatex lt;
+            lt.SetNDC();
+            lt.SetTextSize(0.030);
+            lt.DrawLatex(0.50, 0.60,
+                         Form("Closure (KE %.0f#minus%.0f): #chi^{2}/N = %.2f",
+                              kCloseKEmin, kCloseKEmax, clo.chi2N));
+            lt.DrawLatex(0.50, 0.555,
+                         Form("#LT#sigma_{true}/Bertini#GT = %.2f #pm %.2f",
+                              clo.ratio, clo.ratio_err));
+        }
 
         // ---- BOTTOM PAD: MC / Geant4 ratios ----
         p2->cd();

@@ -23,3 +23,10 @@ run_pionbeamsel_found_20260508.C
 *.root
 DOCS*
 .DS_Store*
+tmp1.tmp
+xsec_summary.aux
+xsec_summary.fdb_latexmk
+xsec_summary.fls
+xsec_summary.log
+xsec_summary.pdf
+xsec_summary.tex
