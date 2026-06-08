@@ -324,7 +324,6 @@ double pionqe0p5::Get_true_tpc_len() {
     if (IsData) return -1.;
     if (!evt.true_beam_traj_Z || evt.true_beam_traj_Z->empty()) return -1.;
  
-
     double true_len = Get_true_beamlen();  // accumulated 3D length from Z = 0
     if (true_len < 0.) return -1.;
     return true_len;
