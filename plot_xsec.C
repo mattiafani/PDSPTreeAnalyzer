@@ -16,8 +16,8 @@
 // ============================================================
 // Parameters — must match pionqe0p5.h constants
 // ============================================================
-const double slice_thickness_cm = 5.;
-const int n_slices = 50;
+const double slice_thickness_cm = 2.5; //5.;
+const int n_slices = 100; //50;
 
 // KE window (MeV) over which the truth-vs-Bertini closure is quantified.
 // Trim edge slices (very high KE near entry, very low KE near stopping) where
