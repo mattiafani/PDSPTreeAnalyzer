@@ -1,8 +1,8 @@
 #include "TLorentzVector.h"
 #include "pionqe0p5.h"
 
-static const double kSliceThickness = 2.5 //5.;  // 10.;  // cm
-static const int kNSlices = 50;
+static const double kSliceThickness = 2.5; //5.;  // 10.;  // cm
+static const int kNSlices = 100; // 50;
 
 void pionqe0p5::initializeAnalyzer() {
     cout << "[[PionAnalyzer::initializeAnalyzer]] Beam Momentum : " << Beam_Momentum << endl;
@@ -318,18 +318,13 @@ double pionqe0p5::Get_true_tpc_len() {
     if (IsData) return -1.;
     if (!evt.true_beam_traj_Z || evt.true_beam_traj_Z->empty()) return -1.;
 
-    // Find the first traj point at or past Z = 0 (TPC front face)
-    double z_ff = -1.;
-    for (int i = 0; i < (int)evt.true_beam_traj_Z->size(); i++) {
-        if (evt.true_beam_traj_Z->at(i) >= 0.) {
-            z_ff = 0.;
-            break;
-        }
-    }
-    if (z_ff < 0.) return -1.;
-    double z_end = evt.true_beam_endZ;
-    if (z_end < 0.) return -1.;
-    double true_len = z_end - z_ff;
+    // Use the 3D trajectory PATH length from the TPC front face (Z = 0) to the
+    // end point, consistent with the reco side (reco_beam_alt_len is a 3D length)
+    // and with the thin-slice formula's assumption that one slice = 5 cm of argon
+    // traversed. The previous version used the Z-projection (true_beam_endZ - z_ff),
+    // which underestimates the argon path by ~1/cos(theta) and biased the truth
+    // thin-slice cross section high, growing with depth as the track scatters.
+    double true_len = Get_true_beamlen();  // accumulated 3D length from Z = 0
     if (true_len < 0.) return -1.;
     return true_len;
 }
