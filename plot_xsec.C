@@ -746,7 +746,33 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         if (g_xsec_mc_reco) g_xsec_mc_reco->Draw("PZ SAME");
         if (g_xsec_mc_true) g_xsec_mc_true->Draw("PZ SAME");
 
-        TLegend* leg = new TLegend(0.45, 0.66, 0.92, 0.88);
+        // TLegend* leg = new TLegend(0.45, 0.66, 0.92, 0.88);
+        // leg->SetBorderSize(0);
+        // leg->SetFillStyle(0);
+        // leg->SetTextSize(0.036);
+        // if (g_g4) leg->AddEntry(g_g4, "Geant4 (Bertini) input", "l");
+        // if (g_xsec_mc_true) leg->AddEntry(g_xsec_mc_true, "MC truth (thin-slice closure)", "lp");
+        // if (g_xsec_mc_reco) leg->AddEntry(g_xsec_mc_reco, "MC reco (uncorrected)", "lp");
+        // leg->Draw();
+        // DrawLabels(Form("%s, t = %.1f cm slices", sig_long.Data(), slice_thickness_cm));
+
+        // // -- Stamp the closure result in the lower-right, clear of the legend
+        // //    and the (busy) resonance region on the left.
+        // if (clo.n > 0) {
+        //     TLatex lt;
+        //     lt.SetNDC();
+        //     lt.SetTextSize(0.028);
+        //     lt.DrawLatex(0.56, 0.45,
+        //                  Form("Closure (KE %.0f#minus%.0f):",
+        //                       kCloseKEmin, kCloseKEmax));
+        //     lt.DrawLatex(0.56, 0.405,
+        //                  Form("#chi^{2}/N = %.2f", clo.chi2N));
+        //     lt.DrawLatex(0.56, 0.36,
+        //                  Form("#LT#sigma_{true}/Bertini#GT = %.2f #pm %.2f",
+        //                       clo.ratio, clo.ratio_err));
+        // }
+
+        TLegend* leg = new TLegend(0.45, 0.62, 0.92, 0.84);  // nudged down
         leg->SetBorderSize(0);
         leg->SetFillStyle(0);
         leg->SetTextSize(0.036);
@@ -754,20 +780,20 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         if (g_xsec_mc_true) leg->AddEntry(g_xsec_mc_true, "MC truth (thin-slice closure)", "lp");
         if (g_xsec_mc_reco) leg->AddEntry(g_xsec_mc_reco, "MC reco (uncorrected)", "lp");
         leg->Draw();
-        DrawLabels(Form("%s, t = %.1f cm slices", sig_long.Data(), slice_thickness_cm));
+        
+        DrawLabels();
+        TLatex lt;
+        lt.SetNDC();
+        lt.SetTextSize(0.034);
+        lt.DrawLatex(0.45, 0.865,
+                     Form("%s, t = %.1f cm slices", sig_long.Data(), slice_thickness_cm));
 
-        // -- Stamp the closure result in the lower-right, clear of the legend
-        //    and the (busy) resonance region on the left.
         if (clo.n > 0) {
-            TLatex lt;
-            lt.SetNDC();
             lt.SetTextSize(0.028);
-            lt.DrawLatex(0.56, 0.45,
-                         Form("Closure (KE %.0f#minus%.0f):",
-                              kCloseKEmin, kCloseKEmax));
-            lt.DrawLatex(0.56, 0.405,
-                         Form("#chi^{2}/N = %.2f", clo.chi2N));
-            lt.DrawLatex(0.56, 0.36,
+            lt.DrawLatex(0.47, 0.575,
+                         Form("Closure (KE %.0f#minus%.0f):", kCloseKEmin, kCloseKEmax));
+            lt.DrawLatex(0.47, 0.530, Form("#chi^{2}/N = %.2f", clo.chi2N));
+            lt.DrawLatex(0.47, 0.485,
                          Form("#LT#sigma_{true}/Bertini#GT = %.2f #pm %.2f",
                               clo.ratio, clo.ratio_err));
         }
