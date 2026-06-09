@@ -25,6 +25,12 @@ const int n_slices = 100; //50;
 const double kCloseKEmin = 50.;
 const double kCloseKEmax = 300.;
 
+// KE window (MeV) actually drawn in the cross-section panels. Trims the
+// end-of-range / first-slice bins where N_inc is tiny and the BB extrapolation
+// is unreliable, so the panels read cleanly without hiding the physics region.
+const double kPlotKEmin = 40.;
+const double kPlotKEmax = 360.;
+
 const double LAr_rho = 1.3954;
 const double LAr_A = 39.948;
 const double Avogadro = 6.02214e23;
@@ -185,7 +191,8 @@ TH1D* XsecHist(TH1D* h_inc, TH1D* h_int, TString name) {
 
 // Convert a per-slice cross-section TH1D to a TGraphErrors, placing each
 // point at the KE recorded for that slice in ke_map.
-TGraphErrors* HistToGraph(TH1D* h, const vector<SliceKE>* ke_map, TString name) {
+TGraphErrors* HistToGraph(TH1D* h, const vector<SliceKE>* ke_map, TString name,
+                          double kemin = -1.e9, double kemax = 1.e9) {
     if (!h) return nullptr;
     vector<double> x, y, ex, ey;
     for (int b = 1; b <= h->GetNbinsX(); b++) {
@@ -202,6 +209,7 @@ TGraphErrors* HistToGraph(TH1D* h, const vector<SliceKE>* ke_map, TString name) 
                     break;
                 }
         }
+        if (xval < kemin || xval > kemax) continue;  // trim unreliable edge bins
         x.push_back(xval);
         y.push_back(sigma);
         ex.push_back(exval);
@@ -541,8 +549,8 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
     TH1D* hx_mc_reco = XsecHist(h_inc_mc_reco, h_int_mc_reco, "hx_mc_reco");
 
     // -- Graphs: true sigma at the true-KE map, reco sigma at the reco-KE map.
-    TGraphErrors* g_xsec_mc_true = HistToGraph(hx_mc_true, &ke_true_channel, "g_xsec_mc_true");
-    TGraphErrors* g_xsec_mc_reco = HistToGraph(hx_mc_reco, &ke_reco, "g_xsec_mc_reco");
+    TGraphErrors* g_xsec_mc_true = HistToGraph(hx_mc_true, &ke_true_channel, "g_xsec_mc_true", kPlotKEmin, kPlotKEmax);
+    TGraphErrors* g_xsec_mc_reco = HistToGraph(hx_mc_reco, &ke_reco, "g_xsec_mc_reco", kPlotKEmin, kPlotKEmax);
 
     // -- Geant4 reference curve
     TGraph* g_g4 = LoadG4Xsec(g4_histname);
@@ -746,17 +754,20 @@ TGraphErrors* plot_xsec_one(TString signal_tag, TString plotdir,
         if (g_xsec_mc_true) leg->AddEntry(g_xsec_mc_true, "MC truth (thin-slice closure)", "lp");
         if (g_xsec_mc_reco) leg->AddEntry(g_xsec_mc_reco, "MC reco (uncorrected)", "lp");
         leg->Draw();
-        DrawLabels(Form("%s, t = %.0f cm slices", sig_long.Data(), slice_thickness_cm));
+        DrawLabels(Form("%s, t = %.1f cm slices", sig_long.Data(), slice_thickness_cm));
 
-        // -- Stamp the closure result on the plot.
+        // -- Stamp the closure result in the lower-right, clear of the legend
+        //    and the (busy) resonance region on the left.
         if (clo.n > 0) {
             TLatex lt;
             lt.SetNDC();
-            lt.SetTextSize(0.030);
-            lt.DrawLatex(0.50, 0.60,
-                         Form("Closure (KE %.0f#minus%.0f): #chi^{2}/N = %.2f",
-                              kCloseKEmin, kCloseKEmax, clo.chi2N));
-            lt.DrawLatex(0.50, 0.555,
+            lt.SetTextSize(0.028);
+            lt.DrawLatex(0.56, 0.45,
+                         Form("Closure (KE %.0f#minus%.0f):",
+                              kCloseKEmin, kCloseKEmax));
+            lt.DrawLatex(0.56, 0.405,
+                         Form("#chi^{2}/N = %.2f", clo.chi2N));
+            lt.DrawLatex(0.56, 0.36,
                          Form("#LT#sigma_{true}/Bertini#GT = %.2f #pm %.2f",
                               clo.ratio, clo.ratio_err));
         }
